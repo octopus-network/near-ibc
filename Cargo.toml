@@ -1,0 +1,29 @@
+[package]
+name = "near-ibc"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+near-sdk = "4.0.0"
+ibc = { version = "0.19.0", git = "https://github.com/cosmos/ibc-rs.git"}
+ibc-proto = { version = "0.20.1" }
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+codegen-units = 1
+# Tell `rustc` to optimize for small code size.
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+# Opt into extra safety checks on arithmetic operations https://stackoverflow.com/a/64136471/249801
+overflow-checks = true
+
+[patch.crates-io]
+# "Update protos to IBC-Go v5.0.0 and Cosmos SDK v0.46.1"
+# [rev](https://github.com/cosmos/ibc-proto-rs/commit/65c050e3a20e3a1ef3c1247788b5013112e207d7)
+ibc-proto = { git = "https://github.com/cosmos/ibc-proto-rs", rev = "65c050e3a20e3a1ef3c1247788b5013112e207d7" }
