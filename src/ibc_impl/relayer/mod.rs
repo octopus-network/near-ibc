@@ -1,18 +1,19 @@
+use crate::IbcContext;
+use ibc::core::ics02_client::client_state::ClientState;
+use ibc::core::ics02_client::header::Header;
+use ibc::core::ics24_host::identifier::ClientId;
+use ibc::events::IbcEvent;
 use ibc::relayer::ics18_relayer::context::Ics18Context;
 use ibc::relayer::ics18_relayer::error::Error as Ics18Error;
 use ibc::signer::Signer;
-use crate::NearContext;
 use ibc::Height;
 use ibc_proto::google::protobuf::Any;
-use ibc::core::ics24_host::identifier::ClientId;
-use ibc::events::IbcEvent;
-use ibc::core::ics02_client::header::Header;
-use ibc::core::ics02_client::client_state::ClientState;
+use near_sdk::env;
 
-impl Ics18Context for NearContext {
+impl Ics18Context for IbcContext<'_> {
     /// Returns the latest height of the chain.
     fn query_latest_height(&self) -> Height {
-        todo!()
+        Height::new(env::epoch_height(), env::block_height()).expect("")
     }
 
     /// Returns this client state for the given `client_id` on this chain.
