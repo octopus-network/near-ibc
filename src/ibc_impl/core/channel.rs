@@ -3,14 +3,16 @@ use crate::ibc_impl::core::host::type_define::{NearConnectionId, StoreInNear};
 use ibc::core::ics04_channel::commitment::{AcknowledgementCommitment, PacketCommitment};
 
 use core::{str::FromStr, time::Duration};
-use sha2::Digest;
+use ibc::core::ics03_connection::error::ConnectionError;
+use ibc::core::ics04_channel::error::PacketError;
 use ibc::{
     core::{
         ics02_client::{
             client_state::ClientState, consensus_state::ConsensusState, context::ClientReader,
         },
         ics03_connection::{
-            connection::ConnectionEnd, context::ConnectionReader, error::Error as Ics03Error,
+            connection::ConnectionEnd, context::ConnectionReader,
+            error::ConnectionError as Ics03Error,
         },
         ics04_channel::{
             channel::ChannelEnd,
@@ -19,7 +21,7 @@ use ibc::{
                 PacketCommitment as IbcPacketCommitment,
             },
             context::{ChannelKeeper, ChannelReader},
-            error::Error as Ics04Error,
+            error::ChannelError,
             packet::{Receipt, Sequence},
         },
         ics24_host::{
@@ -36,6 +38,7 @@ use ibc::{
 };
 use ibc_proto::protobuf::Protobuf;
 use near_sdk::env::sha256;
+use sha2::Digest;
 
 impl ChannelReader for IbcContext<'_> {
     /// Returns the ChannelEnd for the given `port_id` and `chan_id`.
@@ -43,51 +46,49 @@ impl ChannelReader for IbcContext<'_> {
         &self,
         port_id: &PortId,
         channel_id: &ChannelId,
-    ) -> Result<ChannelEnd, Ics04Error> {
-        let channel_end_path = ChannelEndsPath(port_id.clone(), channel_id.clone())
-            .to_string()
-            .as_bytes()
-            .to_vec();
-
+    ) -> Result<ChannelEnd, ChannelError> {
         self.near_ibc_store
             .channels
-            .get(&channel_end_path)
-            .ok_or(Ics04Error::channel_not_found(
-                port_id.clone(),
-                channel_id.clone(),
-            ))
-            .and_then(|near_channel_end| {
-                near_channel_end
-                    .try_into()
-                    // ChannelEnd::decode_vec(&near_channel_end)
-                    .map_err(|_| Ics04Error::channel_not_found(port_id.clone(), channel_id.clone()))
+            .get(&(port_id.clone(), channel_id.clone()))
+            .ok_or(ChannelError::ChannelNotFound {
+                port_id: port_id.clone(),
+                channel_id: channel_id.clone(),
             })
     }
 
     /// Returns the ConnectionState for the given identifier `connection_id`.
-    fn connection_end(&self, connection_id: &ConnectionId) -> Result<ConnectionEnd, Ics04Error> {
-        ConnectionReader::connection_end(self, connection_id).map_err(Ics04Error::ics03_connection)
+    fn connection_end(&self, connection_id: &ConnectionId) -> Result<ConnectionEnd, ChannelError> {
+        ConnectionReader::connection_end(self, connection_id)
+            // .map_err(ChannelError::ics03_connection)
+            .map_err(ChannelError::Connection)
     }
 
     fn connection_channels(
         &self,
         cid: &ConnectionId,
-    ) -> Result<Vec<(PortId, ChannelId)>, Ics04Error> {
+    ) -> Result<Vec<(PortId, ChannelId)>, ChannelError> {
         let connection_channels = self
             .near_ibc_store
             .connection_channels
-            .get(&cid.as_bytes().to_vec().into())
-            .ok_or(Ics04Error::connection_not_open(cid.clone()))?;
+            .get(&cid)
+            // .ok_or(ChannelError::connection_not_open(cid.clone()))?;
+            .ok_or(ChannelError::ConnectionNotOpen {
+                connection_id: cid.clone(),
+            })?;
 
         let mut result: Vec<(PortId, ChannelId)> = vec![];
         for (near_port_id, near_channel_id) in connection_channels {
             result.push((
-                near_port_id.try_into().map_err(|e| {
-                    Ics04Error::other(format!("Decode ChannelEnds Path format Failed: {:?}", e))
+                near_port_id.try_into().map_err(|e| ChannelError::Other {
+                    description: format!("Decode ChannelEnds Path format Failed: {:?}", e)
+                        .to_string(),
                 })?,
-                near_channel_id.try_into().map_err(|e| {
-                    Ics04Error::other(format!("Decode ChannelEnds Path format Failed: {:?}", e))
-                })?,
+                near_channel_id
+                    .try_into()
+                    .map_err(|e| ChannelError::Other {
+                        description: format!("Decode ChannelEnds Path format Failed: {:?}", e)
+                            .to_string(),
+                    })?,
             ))
         }
 
@@ -96,47 +97,47 @@ impl ChannelReader for IbcContext<'_> {
 
     /// Returns the ClientState for the given identifier `client_id`. Necessary dependency towards
     /// proof verification.
-    fn client_state(&self, client_id: &ClientId) -> Result<Box<dyn ClientState>, Ics04Error> {
+    fn client_state(&self, client_id: &ClientId) -> Result<Box<dyn ClientState>, ChannelError> {
         ClientReader::client_state(self, client_id)
-            .map_err(|e| Ics04Error::ics03_connection(Ics03Error::ics02_client(e)))
+            // .map_err(|e| ChannelError::ics03_connection(Ics03Error::ics02_client(e)))
+            .map_err(|e| ChannelError::Connection(ConnectionError::Client(e)))
     }
 
     fn client_consensus_state(
         &self,
         client_id: &ClientId,
         height: Height,
-    ) -> Result<Box<dyn ConsensusState>, Ics04Error> {
+    ) -> Result<Box<dyn ConsensusState>, ChannelError> {
         ClientReader::consensus_state(self, client_id, height)
-            .map_err(|e| Ics04Error::ics03_connection(Ics03Error::ics02_client(e)))
+            .map_err(|e| ChannelError::Connection(ConnectionError::Client(e)))
     }
 
     fn get_next_sequence_send(
         &self,
         port_id: &PortId,
         channel_id: &ChannelId,
-    ) -> Result<Sequence, Ics04Error> {
+    ) -> Result<Sequence, PacketError> {
         self.near_ibc_store
             .next_sequence_send
-            .get(&(port_id.as_bytes().into(), channel_id.as_bytes().into()))
-            .ok_or(Ics04Error::missing_next_send_seq(
-                port_id.clone(),
-                channel_id.clone(),
-            ))
-            .map(Into::into)
+            .get(&(port_id.clone(), channel_id.clone()))
+            .ok_or(PacketError::MissingNextSendSeq {
+                port_id: port_id.clone(),
+                channel_id: channel_id.clone(),
+            })
     }
 
     fn get_next_sequence_recv(
         &self,
         port_id: &PortId,
         channel_id: &ChannelId,
-    ) -> Result<Sequence, Ics04Error> {
+    ) -> Result<Sequence, PacketError> {
         self.near_ibc_store
             .next_sequence_recv
-            .get(&(port_id.as_bytes().into(), channel_id.as_bytes().into()))
-            .ok_or(Ics04Error::missing_next_send_seq(
-                port_id.clone(),
-                channel_id.clone(),
-            ))
+            .get(&(port_id.clone(), channel_id.clone()))
+            .ok_or(PacketError::MissingNextRecvSeq {
+                port_id: port_id.clone(),
+                channel_id: channel_id.clone(),
+            })
             .map(Into::into)
     }
 
@@ -144,15 +145,14 @@ impl ChannelReader for IbcContext<'_> {
         &self,
         port_id: &PortId,
         channel_id: &ChannelId,
-    ) -> Result<Sequence, Ics04Error> {
+    ) -> Result<Sequence, PacketError> {
         self.near_ibc_store
             .next_sequence_ack
-            .get(&(port_id.as_bytes().into(), channel_id.as_bytes().into()))
-            .ok_or(Ics04Error::missing_next_send_seq(
-                port_id.clone(),
-                channel_id.clone(),
-            ))
-            .map(Into::into)
+            .get(&(port_id.clone(), channel_id.clone()))
+            .ok_or(PacketError::MissingNextSendSeq {
+                port_id: port_id.clone(),
+                channel_id: channel_id.clone(),
+            })
     }
 
     fn get_packet_commitment(
@@ -160,15 +160,14 @@ impl ChannelReader for IbcContext<'_> {
         port_id: &PortId,
         channel_id: &ChannelId,
         sequence: Sequence,
-    ) -> Result<PacketCommitment, Ics04Error> {
+    ) -> Result<PacketCommitment, PacketError> {
         self.near_ibc_store
             .packet_commitment
-            .get(&(port_id.as_bytes().into(), channel_id.as_bytes().into()))
-            .ok_or(Ics04Error::missing_next_send_seq(
-                port_id.clone(),
-                channel_id.clone(),
-            ))
-            .map(Into::into)
+            .get(&(port_id.clone(), channel_id.clone(), sequence))
+            .ok_or(PacketError::MissingNextSendSeq {
+                port_id: port_id.clone(),
+                channel_id: channel_id.clone(),
+            })
     }
 
     fn get_packet_receipt(
@@ -176,12 +175,11 @@ impl ChannelReader for IbcContext<'_> {
         port_id: &PortId,
         channel_id: &ChannelId,
         sequence: Sequence,
-    ) -> Result<Receipt, Ics04Error> {
+    ) -> Result<Receipt, PacketError> {
         self.near_ibc_store
             .packet_receipt
-            .get(&(port_id.as_bytes().into(), channel_id.as_bytes().into()))
-            .ok_or(Ics04Error::packet_receipt_not_found(sequence))
-            .and_then(TryInto::try_into)
+            .get(&(port_id.clone(), channel_id.clone(), sequence.clone()))
+            .ok_or(PacketError::PacketReceiptNotFound { sequence })
     }
 
     fn get_packet_acknowledgement(
@@ -189,15 +187,11 @@ impl ChannelReader for IbcContext<'_> {
         port_id: &PortId,
         channel_id: &ChannelId,
         sequence: Sequence,
-    ) -> Result<AcknowledgementCommitment, Ics04Error> {
+    ) -> Result<AcknowledgementCommitment, PacketError> {
         self.near_ibc_store
             .packet_acknowledgement
-            .get(&(
-                port_id.as_bytes().into(),
-                channel_id.as_bytes().into(),
-                sequence.into(),
-            ))
-            .ok_or(Ics04Error::packet_acknowledgement_not_found(sequence))
+            .get(&(port_id.clone(), channel_id.clone(), sequence.clone()))
+            .ok_or(PacketError::PacketAcknowledgementNotFound { sequence })
             .map(Into::into)
     }
 
@@ -207,19 +201,22 @@ impl ChannelReader for IbcContext<'_> {
     }
 
     /// Returns the current height of the local chain.
-    fn host_height(&self) -> Height {
-        ClientReader::host_height(self)
+    fn host_height(&self) -> Result<Height, ChannelError> {
+        ClientReader::host_height(self).map_err(|error| ChannelError::MissingHeight)
     }
 
     /// Returns the `ConsensusState` of the host (local) chain at a specific height.
-    fn host_consensus_state(&self, height: Height) -> Result<Box<dyn ConsensusState>, Ics04Error> {
-        ConnectionReader::host_consensus_state(self, height).map_err(Ics04Error::ics03_connection)
+    fn host_consensus_state(
+        &self,
+        height: Height,
+    ) -> Result<Box<dyn ConsensusState>, ChannelError> {
+        ConnectionReader::host_consensus_state(self, height).map_err(ChannelError::Connection)
     }
 
     /// Returns the pending `ConsensusState` of the host (local) chain.
-    fn pending_host_consensus_state(&self) -> Result<Box<dyn ConsensusState>, Ics04Error> {
+    fn pending_host_consensus_state(&self) -> Result<Box<dyn ConsensusState>, ChannelError> {
         ClientReader::pending_host_consensus_state(self)
-            .map_err(|e| Ics04Error::ics03_connection(Ics03Error::ics02_client(e)))
+            .map_err(|e| ChannelError::Connection(ConnectionError::Client(e)))
     }
 
     /// Returns the time when the client state for the given [`ClientId`] was updated with a header for the given [`Height`]
@@ -227,17 +224,17 @@ impl ChannelReader for IbcContext<'_> {
         &self,
         client_id: &ClientId,
         height: Height,
-    ) -> Result<Timestamp, Ics04Error> {
+    ) -> Result<Timestamp, ChannelError> {
         self.near_ibc_store
             .client_processed_times
-            .get(&(client_id.as_bytes().into(), height.into()))
-            .ok_or(Ics04Error::processed_time_not_found(
-                client_id.clone(),
+            .get(&(client_id.clone(), height.clone()))
+            .ok_or(ChannelError::ProcessedTimeNotFound {
+                client_id: client_id.clone(),
                 height,
-            ))
+            })
             .and_then(|time| {
-                Timestamp::from_nanoseconds(time).map_err(|e| {
-                    Ics04Error::other(format!("Timestamp from_nanoseconds failed: {:?}", e))
+                Timestamp::from_nanoseconds(time).map_err(|e| ChannelError::Other {
+                    description: format!("Timestamp from_nanoseconds failed: {:?}", e).to_string(),
                 })
             })
     }
@@ -247,21 +244,20 @@ impl ChannelReader for IbcContext<'_> {
         &self,
         client_id: &ClientId,
         height: Height,
-    ) -> Result<Height, Ics04Error> {
+    ) -> Result<Height, ChannelError> {
         self.near_ibc_store
             .client_processed_heights
-            .get(&(client_id.as_bytes().into(), height.into()))
-            .ok_or(Ics04Error::processed_height_not_found(
-                client_id.clone(),
+            .get(&(client_id.clone(), height.clone()))
+            .ok_or(ChannelError::ProcessedHeightNotFound {
+                client_id: client_id.clone(),
                 height,
-            ))
-            .map(Into::into)
+            })
     }
 
     /// Returns a counter on the number of channel ids have been created thus far.
     /// The value of this counter should increase only via method
     /// `ChannelKeeper::increase_channel_counter`.
-    fn channel_counter(&self) -> Result<u64, Ics04Error> {
+    fn channel_counter(&self) -> Result<u64, ChannelError> {
         Ok(self.near_ibc_store.channel_ids_counter)
     }
 
@@ -279,10 +275,10 @@ impl ChannelKeeper for IbcContext<'_> {
         channel_id: ChannelId,
         sequence: Sequence,
         commitment: PacketCommitment,
-    ) -> Result<(), Ics04Error> {
+    ) -> Result<(), PacketError> {
         self.near_ibc_store.packet_commitment.insert(
-            &(port_id.as_bytes().into(), channel_id.as_bytes().into()),
-            &commitment.into_vec(),
+            &(port_id.clone(), channel_id.clone(), sequence),
+            &commitment,
         );
 
         Ok(())
@@ -293,10 +289,10 @@ impl ChannelKeeper for IbcContext<'_> {
         port_id: &PortId,
         channel_id: &ChannelId,
         seq: Sequence,
-    ) -> Result<(), Ics04Error> {
+    ) -> Result<(), PacketError> {
         self.near_ibc_store
             .packet_commitment
-            .remove(&(port_id.as_bytes().into(), channel_id.as_bytes().into()));
+            .remove(&(port_id.clone(), channel_id.clone(), seq));
         Ok(())
     }
 
@@ -306,7 +302,7 @@ impl ChannelKeeper for IbcContext<'_> {
         channel_id: ChannelId,
         sequence: Sequence,
         receipt: Receipt,
-    ) -> Result<(), Ics04Error> {
+    ) -> Result<(), PacketError> {
         let packet_receipt_path = ReceiptsPath {
             port_id: port_id.clone(),
             channel_id: channel_id.clone(),
@@ -316,14 +312,9 @@ impl ChannelKeeper for IbcContext<'_> {
         .as_bytes()
         .to_vec();
 
-        let receipt = match receipt {
-            Receipt::Ok => "Ok",
-        };
-
-        self.near_ibc_store.packet_receipt.insert(
-            &(port_id.as_bytes().into(), channel_id.as_bytes().into()),
-            &receipt.as_bytes().into(),
-        );
+        self.near_ibc_store
+            .packet_receipt
+            .insert(&(port_id.clone(), channel_id.clone(), sequence), &receipt);
 
         Ok(())
     }
@@ -334,14 +325,10 @@ impl ChannelKeeper for IbcContext<'_> {
         channel_id: ChannelId,
         sequence: Sequence,
         ack_commitment: AcknowledgementCommitment,
-    ) -> Result<(), Ics04Error> {
+    ) -> Result<(), PacketError> {
         self.near_ibc_store.packet_acknowledgement.insert(
-            &(
-                port_id.as_bytes().into(),
-                channel_id.as_bytes().into(),
-                sequence.into(),
-            ),
-            &ack_commitment.into_vec(),
+            &(port_id.clone(), channel_id.clone(), sequence.clone()),
+            &ack_commitment,
         );
 
         Ok(())
@@ -352,19 +339,11 @@ impl ChannelKeeper for IbcContext<'_> {
         port_id: &PortId,
         channel_id: &ChannelId,
         sequence: Sequence,
-    ) -> Result<(), Ics04Error> {
-        let acks_path = AcksPath {
-            port_id: port_id.clone(),
-            channel_id: channel_id.clone(),
-            sequence,
-        }
-        .to_string()
-        .as_bytes()
-        .to_vec();
+    ) -> Result<(), PacketError> {
         self.near_ibc_store.packet_acknowledgement.remove(&(
-            port_id.as_bytes().into(),
-            channel_id.as_bytes().into(),
-            sequence.into(),
+            port_id.clone(),
+            channel_id.clone(),
+            sequence,
         ));
         Ok(())
     }
@@ -374,21 +353,17 @@ impl ChannelKeeper for IbcContext<'_> {
         conn_id: ConnectionId,
         port_id: PortId,
         channel_id: ChannelId,
-    ) -> Result<(), Ics04Error> {
-        let near_conn_id = conn_id.as_bytes().to_vec();
+    ) -> Result<(), ChannelError> {
         let mut vec = self
             .near_ibc_store
             .connection_channels
-            .get(&StoreInNear(near_conn_id))
+            .get(&conn_id)
             .unwrap_or_default();
-        vec.push((
-            StoreInNear(port_id.as_bytes().to_vec()),
-            channel_id.as_bytes().to_vec().into(),
-        ));
+        vec.push((port_id, channel_id));
 
         self.near_ibc_store
             .connection_channels
-            .insert(&conn_id.as_bytes().to_vec().into(), &vec);
+            .insert(&conn_id, &vec);
 
         Ok(())
     }
@@ -399,19 +374,10 @@ impl ChannelKeeper for IbcContext<'_> {
         port_id: PortId,
         channel_id: ChannelId,
         channel_end: ChannelEnd,
-    ) -> Result<(), Ics04Error> {
-        let channel_ends_path = ChannelEndsPath(port_id.clone(), channel_id.clone())
-            .to_string()
-            .as_bytes()
-            .to_vec();
-
-        let channel_end = channel_end
-            .encode_vec()
-            .map_err(|e| Ics04Error::other(format!("encode channel end failed: {:?}", e)))?;
-
+    ) -> Result<(), ChannelError> {
         self.near_ibc_store
             .channels
-            .insert(&channel_ends_path, &StoreInNear(channel_end));
+            .insert(&(port_id.clone(), channel_id.clone()), &channel_end);
 
         Ok(())
     }
@@ -421,11 +387,10 @@ impl ChannelKeeper for IbcContext<'_> {
         port_id: PortId,
         channel_id: ChannelId,
         seq: Sequence,
-    ) -> Result<(), Ics04Error> {
-        self.near_ibc_store.next_sequence_send.insert(
-            &(port_id.as_bytes().into(), channel_id.as_bytes().into()),
-            &(seq.into()),
-        );
+    ) -> Result<(), PacketError> {
+        self.near_ibc_store
+            .next_sequence_send
+            .insert(&(port_id.clone(), channel_id.clone()), &(seq.into()));
         Ok(())
     }
 
@@ -434,11 +399,10 @@ impl ChannelKeeper for IbcContext<'_> {
         port_id: PortId,
         channel_id: ChannelId,
         seq: Sequence,
-    ) -> Result<(), Ics04Error> {
-        self.near_ibc_store.next_sequence_recv.insert(
-            &(port_id.as_bytes().into(), channel_id.as_bytes().into()),
-            &(seq.into()),
-        );
+    ) -> Result<(), PacketError> {
+        self.near_ibc_store
+            .next_sequence_recv
+            .insert(&(port_id.clone(), channel_id.clone()), &(seq.into()));
 
         Ok(())
     }
@@ -448,11 +412,10 @@ impl ChannelKeeper for IbcContext<'_> {
         port_id: PortId,
         channel_id: ChannelId,
         seq: Sequence,
-    ) -> Result<(), Ics04Error> {
-        self.near_ibc_store.next_sequence_ack.insert(
-            &(port_id.as_bytes().into(), channel_id.as_bytes().into()),
-            &(seq.into()),
-        );
+    ) -> Result<(), PacketError> {
+        self.near_ibc_store
+            .next_sequence_ack
+            .insert(&(port_id.clone(), channel_id.clone()), &(seq.into()));
 
         Ok(())
     }

@@ -1,8 +1,7 @@
 use crate::context::IbcContext;
 
-// use ibc::core::ics03_connection::error::Error as Ics03Error;
+// use ibc::core::ics03_connection::error::Error as ConnectionError;
 
-use ibc::relayer::ics18_relayer::context::Ics18Context;
 use ibc::{
     core::{
         ics02_client::{
@@ -11,7 +10,7 @@ use ibc::{
         ics03_connection::{
             connection::ConnectionEnd,
             context::{ConnectionKeeper, ConnectionReader},
-            error::Error as Ics03Error,
+            error::ConnectionError,
         },
         ics23_commitment::commitment::CommitmentPrefix,
         ics24_host::{
@@ -26,34 +25,39 @@ use near_sdk::env;
 
 impl ConnectionReader for IbcContext<'_> {
     /// Returns the ConnectionEnd for the given identifier `conn_id`.
-    fn connection_end(&self, conn_id: &ConnectionId) -> Result<ConnectionEnd, Ics03Error> {
+    fn connection_end(&self, conn_id: &ConnectionId) -> Result<ConnectionEnd, ConnectionError> {
         self.near_ibc_store
             .connections
-            .get(&conn_id.as_bytes().to_vec().into())
-            .ok_or(Ics03Error::connection_mismatch(conn_id.clone()))
-            .and_then(|data| {
-                ConnectionEnd::decode_vec(&data)
-                    .map_err(|e| Ics03Error::other(format!("Decode ConnectionEnd failed: {:?}", e)))
+            .get(&conn_id)
+            .ok_or(ConnectionError::ConnectionMismatch {
+                connection_id: conn_id.clone(),
             })
     }
 
     /// Returns the ClientState for the given identifier `client_id`.
-    fn client_state(&self, client_id: &ClientId) -> Result<Box<dyn ClientState>, Ics03Error> {
-        ClientReader::client_state(self, client_id).map_err(Ics03Error::ics02_client)
+    fn client_state(&self, client_id: &ClientId) -> Result<Box<dyn ClientState>, ConnectionError> {
+        ClientReader::client_state(self, client_id)
+            // .map_err(ConnectionError::ics02_client)
+            .map_err(|e| ConnectionError::Client(e))
     }
 
     /// Tries to decode the given `client_state` into a concrete light client state.
-    fn decode_client_state(&self, client_state: Any) -> Result<Box<dyn ClientState>, Ics03Error> {
-        ClientReader::decode_client_state(self, client_state).map_err(Ics03Error::ics02_client)
+    fn decode_client_state(
+        &self,
+        client_state: Any,
+    ) -> Result<Box<dyn ClientState>, ConnectionError> {
+        ClientReader::decode_client_state(self, client_state)
+            .map_err(|e| ConnectionError::Client(e))
     }
 
     /// Returns the current height of the local chain.
-    fn host_current_height(&self) -> Height {
-        Height::new(env::epoch_height(), env::block_height()).unwrap()
+    fn host_current_height(&self) -> Result<Height, ConnectionError> {
+        Height::new(env::epoch_height(), env::block_height())
+            .map_err(|e| ConnectionError::Client(e))
     }
 
     /// Returns the oldest height available on the local chain.
-    fn host_oldest_height(&self) -> Height {
+    fn host_oldest_height(&self) -> Result<Height, ConnectionError> {
         todo!()
     }
 
@@ -67,24 +71,27 @@ impl ConnectionReader for IbcContext<'_> {
         &self,
         client_id: &ClientId,
         height: Height,
-    ) -> Result<Box<dyn ConsensusState>, Ics03Error> {
+    ) -> Result<Box<dyn ConsensusState>, ConnectionError> {
         self.consensus_state(client_id, height)
-            .map_err(Ics03Error::ics02_client)
+            .map_err(|e| ConnectionError::Client(e))
     }
 
     /// Returns the ConsensusState of the host (local) chain at a specific height.
-    fn host_consensus_state(&self, height: Height) -> Result<Box<dyn ConsensusState>, Ics03Error> {
-        ClientReader::host_consensus_state(self, height).map_err(Ics03Error::ics02_client)
+    fn host_consensus_state(
+        &self,
+        height: Height,
+    ) -> Result<Box<dyn ConsensusState>, ConnectionError> {
+        ClientReader::host_consensus_state(self, height).map_err(ConnectionError::Client)
     }
 
     /// Returns a counter on how many connections have been created thus far.
     /// The value of this counter should increase only via method
     /// `ConnectionKeeper::increase_connection_counter`.
-    fn connection_counter(&self) -> Result<u64, Ics03Error> {
+    fn connection_counter(&self) -> Result<u64, ConnectionError> {
         Ok(self.near_ibc_store.connection_ids_counter)
     }
 
-    fn validate_self_client(&self, counterparty_client_state: Any) -> Result<(), Ics03Error> {
+    fn validate_self_client(&self, counterparty_client_state: Any) -> Result<(), ConnectionError> {
         Ok(())
     }
 }
@@ -95,13 +102,10 @@ impl ConnectionKeeper for IbcContext<'_> {
         &mut self,
         connection_id: ConnectionId,
         connection_end: &ConnectionEnd,
-    ) -> Result<(), Ics03Error> {
-        let data = connection_end
-            .encode_vec()
-            .map_err(|e| Ics03Error::other(format!("Encode ConnectionEnd failed: {:?}", e)))?;
+    ) -> Result<(), ConnectionError> {
         self.near_ibc_store
             .connections
-            .insert(&connection_id.as_bytes().to_vec().into(), &data);
+            .insert(&connection_id, &connection_end);
         Ok(())
     }
 
@@ -110,11 +114,10 @@ impl ConnectionKeeper for IbcContext<'_> {
         &mut self,
         connection_id: ConnectionId,
         client_id: &ClientId,
-    ) -> Result<(), Ics03Error> {
-        self.near_ibc_store.client_connections.insert(
-            &client_id.as_bytes().to_vec(),
-            &connection_id.as_bytes().to_vec().into(),
-        );
+    ) -> Result<(), ConnectionError> {
+        self.near_ibc_store
+            .client_connections
+            .insert(&client_id, &connection_id);
         Ok(())
     }
 

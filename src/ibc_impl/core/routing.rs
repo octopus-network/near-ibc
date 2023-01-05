@@ -1,5 +1,5 @@
 use crate::context::IbcContext;
-use ibc::core::ics26_routing::context::{Ics26Context, Module, ModuleId, Router, RouterBuilder};
+use ibc::core::ics26_routing::context::{Module, ModuleId, Router, RouterBuilder, RouterContext};
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter};
@@ -42,7 +42,7 @@ impl Router for NearRouter {
     }
 }
 
-impl Ics26Context for IbcContext<'_> {
+impl RouterContext for IbcContext<'_> {
     type Router = NearRouter;
 
     fn router(&self) -> &Self::Router {

@@ -19,7 +19,7 @@ pub mod type_define {
     pub type NearModuleId = Vec<u8>;
     pub type NearIbcHeight = NearHeight;
     pub type NearTimeStamp = u64;
-    pub type NearIbcHostHeight = NearHeight;
+    pub type IbcHostHeight = Height;
     pub type NearClientConsensusStatePath = Vec<u8>;
     pub type NearConsensusState = Vec<u8>;
     pub type NearConnectionsPath = Vec<u8>;
@@ -71,52 +71,6 @@ pub mod type_define {
 
     #[derive(BorshSerialize, BorshDeserialize)]
     pub struct StoreInNear(pub Vec<u8>);
-    impl TryInto<ChannelEnd> for NearChannelEnd {
-        type Error = ibc_proto::protobuf::Error;
-
-        fn try_into(self) -> Result<ChannelEnd, Self::Error> {
-            ChannelEnd::decode_vec(&self.0)
-        }
-    }
-
-    impl TryInto<PortId> for NearPortId {
-        type Error = ibc::core::ics24_host::error::ValidationError;
-
-        fn try_into(self) -> Result<PortId, Self::Error> {
-            // todo use correct error type replace unwrap
-            PortId::from_str(String::from_utf8(self.0).unwrap().as_str())
-        }
-    }
-
-    impl TryInto<ChannelId> for NearPortId {
-        type Error = ibc::core::ics24_host::error::ValidationError;
-
-        fn try_into(self) -> Result<ChannelId, Self::Error> {
-            // todo use correct error type replace unwrap
-            ChannelId::from_str(String::from_utf8(self.0).unwrap().as_str())
-        }
-    }
-
-    impl TryInto<Receipt> for NearReceipt {
-        type Error = ibc::core::ics04_channel::error::Error;
-
-        fn try_into(self) -> Result<Receipt, Self::Error> {
-            let data = String::from_utf8(self.0).map_err(|e| {
-                ibc::core::ics04_channel::error::Error::other(format!(
-                    "Decode packet receipt failed: {:?}",
-                    e
-                ))
-            })?;
-
-            return match data.as_str() {
-                "Ok" => Ok(Receipt::Ok),
-                e => Err(ibc::core::ics04_channel::error::Error::other(format!(
-                    "Unknown Receipts {:?}",
-                    e
-                ))),
-            };
-        }
-    }
 
     impl From<Vec<u8>> for StoreInNear {
         fn from(data: Vec<u8>) -> Self {

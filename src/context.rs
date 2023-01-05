@@ -1,24 +1,28 @@
 use crate::ibc_impl::core::host::type_define::{
-    NearAcknowledgementCommitment, NearAcksPath, NearChannelEnd, NearChannelEndsPath,
-    NearChannelId, NearClientId, NearClientState, NearClientStatePath, NearClientType,
-    NearClientTypePath, NearCommitmentsPath, NearConnectionEnd, NearConnectionId,
-    NearConsensusState, NearHeight, NearIbcHeight, NearIbcHostHeight, NearModuleId,
-    NearPacketCommitment, NearPortId, NearReceipt, NearRecipientsPath, NearSeqAcksPath,
-    NearSeqRecvsPath, NearSeqSendsPath, NearSequence, NearTimeStamp,
+    IbcHostHeight, NearAcknowledgementCommitment, NearAcksPath, NearChannelEnd,
+    NearChannelEndsPath, NearChannelId, NearClientId, NearClientState, NearClientStatePath,
+    NearClientType, NearClientTypePath, NearCommitmentsPath, NearConnectionEnd, NearConnectionId,
+    NearConsensusState, NearHeight, NearIbcHeight, NearModuleId, NearPacketCommitment, NearPortId,
+    NearReceipt, NearRecipientsPath, NearSeqAcksPath, NearSeqRecvsPath, NearSeqSendsPath,
+    NearSequence, NearTimeStamp,
 };
 use crate::ibc_impl::core::routing::{NearRouter, NearRouterBuilder};
 use crate::link_map::KeySortLinkMap;
 use crate::*;
 use ibc::core::ics02_client::client_type::ClientType;
-use ibc::core::ics24_host::identifier::ChainId;
+use ibc::core::ics02_client::height::Height;
+use ibc::core::ics03_connection::connection::ConnectionEnd;
+use ibc::core::ics04_channel::channel::ChannelEnd;
+use ibc::core::ics04_channel::commitment::{AcknowledgementCommitment, PacketCommitment};
+use ibc::core::ics04_channel::packet::{Receipt, Sequence};
+use ibc::core::ics24_host::identifier::{ChainId, ChannelId, ClientId, ConnectionId, PortId};
 use ibc::core::ics24_host::path::ClientTypePath;
 use ibc::{
     applications::transfer::MODULE_ID_STR,
     core::ics26_routing::context::{Module, ModuleId, RouterBuilder},
 };
-use ibc::mock::host::HostType;
 use ibc_proto::google::protobuf::Duration;
-use near_sdk::collections::{LookupMap, TreeMap};
+use near_sdk::collections::{LookupMap, UnorderedMap};
 
 // #[derive(Debug)]
 // pub struct HostType;
@@ -71,38 +75,37 @@ impl<'a> IbcContext<'a> {
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct NearIbcStore {
     // pub clients: LookupMap<NearClientId, NearClientRecord>,
-    pub client_types: LookupMap<NearClientTypePath, NearClientType>,
-    pub client_state: LookupMap<NearClientStatePath, NearClientState>,
-    pub consensus_states: KeySortLinkMap<NearHeight, NearConsensusState>,
-    pub client_processed_times: LookupMap<(NearClientId, NearIbcHeight), NearTimeStamp>,
-    pub client_processed_heights: LookupMap<(NearClientId, NearIbcHeight), NearIbcHostHeight>,
+    pub client_types: LookupMap<ClientId, ClientType>,
+    pub client_state: UnorderedMap<ClientId, NearClientState>,
+    pub consensus_states: KeySortLinkMap<Height, NearConsensusState>,
+    pub client_processed_times: LookupMap<(ClientId, Height), NearTimeStamp>,
+    pub client_processed_heights: LookupMap<(ClientId, Height), IbcHostHeight>,
 
     pub client_ids_counter: u64,
 
-    pub client_connections: LookupMap<NearClientId, NearConnectionId>,
+    pub client_connections: LookupMap<ClientId, ConnectionId>,
 
-    pub connections: LookupMap<NearConnectionId, NearConnectionEnd>,
+    pub connections: UnorderedMap<ConnectionId, ConnectionEnd>,
 
     pub connection_ids_counter: u64,
 
-    pub connection_channels: LookupMap<NearConnectionId, Vec<(NearPortId, NearChannelId)>>,
+    pub connection_channels: LookupMap<ConnectionId, Vec<(PortId, ChannelId)>>,
 
     pub channel_ids_counter: u64,
 
-    pub channels: LookupMap<NearChannelEndsPath, NearChannelEnd>,
+    pub channels: UnorderedMap<(PortId, ChannelId), ChannelEnd>,
 
-    pub next_sequence_send: LookupMap<(NearPortId, NearChannelId), NearSequence>,
+    pub next_sequence_send: LookupMap<(PortId, ChannelId), Sequence>,
 
-    pub next_sequence_recv: LookupMap<(NearPortId, NearChannelId), NearSequence>,
+    pub next_sequence_recv: LookupMap<(PortId, ChannelId), Sequence>,
 
-    pub next_sequence_ack: LookupMap<(NearPortId, NearChannelId), NearSequence>,
+    pub next_sequence_ack: LookupMap<(PortId, ChannelId), Sequence>,
 
-    pub packet_receipt: LookupMap<(NearPortId, NearChannelId), NearReceipt>,
+    pub packet_receipt: LookupMap<(PortId, ChannelId, Sequence), Receipt>,
 
-    pub packet_acknowledgement:
-        LookupMap<(NearPortId, NearChannelId, NearSequence), NearAcknowledgementCommitment>,
+    pub packet_acknowledgement: LookupMap<(PortId, ChannelId, Sequence), AcknowledgementCommitment>,
 
-    pub port_to_module: LookupMap<NearPortId, NearModuleId>,
+    pub port_to_module: LookupMap<PortId, ModuleId>,
 
-    pub packet_commitment: LookupMap<(NearPortId, NearChannelId), NearPacketCommitment>,
+    pub packet_commitment: LookupMap<(PortId, ChannelId, Sequence), PacketCommitment>,
 }
