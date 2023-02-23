@@ -106,7 +106,7 @@ impl ChannelReader for IbcContext<'_> {
     fn client_consensus_state(
         &self,
         client_id: &ClientId,
-        height: Height,
+        height: &Height,
     ) -> Result<Box<dyn ConsensusState>, ChannelError> {
         ClientReader::consensus_state(self, client_id, height)
             .map_err(|e| ChannelError::Connection(ConnectionError::Client(e)))
@@ -159,11 +159,11 @@ impl ChannelReader for IbcContext<'_> {
         &self,
         port_id: &PortId,
         channel_id: &ChannelId,
-        sequence: Sequence,
+        sequence: &Sequence,
     ) -> Result<PacketCommitment, PacketError> {
         self.near_ibc_store
             .packet_commitment
-            .get(&(port_id.clone(), channel_id.clone(), sequence))
+            .get(&(port_id.clone(), channel_id.clone(), sequence.clone()))
             .ok_or(PacketError::MissingNextSendSeq {
                 port_id: port_id.clone(),
                 channel_id: channel_id.clone(),
@@ -174,29 +174,33 @@ impl ChannelReader for IbcContext<'_> {
         &self,
         port_id: &PortId,
         channel_id: &ChannelId,
-        sequence: Sequence,
+        sequence: &Sequence,
     ) -> Result<Receipt, PacketError> {
         self.near_ibc_store
             .packet_receipt
             .get(&(port_id.clone(), channel_id.clone(), sequence.clone()))
-            .ok_or(PacketError::PacketReceiptNotFound { sequence })
+            .ok_or(PacketError::PacketReceiptNotFound {
+                sequence: sequence.clone(),
+            })
     }
 
     fn get_packet_acknowledgement(
         &self,
         port_id: &PortId,
         channel_id: &ChannelId,
-        sequence: Sequence,
+        sequence: &Sequence,
     ) -> Result<AcknowledgementCommitment, PacketError> {
         self.near_ibc_store
             .packet_acknowledgement
             .get(&(port_id.clone(), channel_id.clone(), sequence.clone()))
-            .ok_or(PacketError::PacketAcknowledgementNotFound { sequence })
+            .ok_or(PacketError::PacketAcknowledgementNotFound {
+                sequence: sequence.clone(),
+            })
             .map(Into::into)
     }
 
     /// A hashing function for packet commitments
-    fn hash(&self, value: Vec<u8>) -> Vec<u8> {
+    fn hash(&self, value: &[u8]) -> Vec<u8> {
         sha2::Sha256::digest(value).to_vec()
     }
 
@@ -208,7 +212,7 @@ impl ChannelReader for IbcContext<'_> {
     /// Returns the `ConsensusState` of the host (local) chain at a specific height.
     fn host_consensus_state(
         &self,
-        height: Height,
+        height: &Height,
     ) -> Result<Box<dyn ConsensusState>, ChannelError> {
         ConnectionReader::host_consensus_state(self, height).map_err(ChannelError::Connection)
     }
@@ -223,14 +227,14 @@ impl ChannelReader for IbcContext<'_> {
     fn client_update_time(
         &self,
         client_id: &ClientId,
-        height: Height,
+        height: &Height,
     ) -> Result<Timestamp, ChannelError> {
         self.near_ibc_store
             .client_processed_times
             .get(&(client_id.clone(), height.clone()))
             .ok_or(ChannelError::ProcessedTimeNotFound {
                 client_id: client_id.clone(),
-                height,
+                height: height.clone(),
             })
             .and_then(|time| {
                 Timestamp::from_nanoseconds(time).map_err(|e| ChannelError::Other {
@@ -243,14 +247,14 @@ impl ChannelReader for IbcContext<'_> {
     fn client_update_height(
         &self,
         client_id: &ClientId,
-        height: Height,
+        height: &Height,
     ) -> Result<Height, ChannelError> {
         self.near_ibc_store
             .client_processed_heights
             .get(&(client_id.clone(), height.clone()))
             .ok_or(ChannelError::ProcessedHeightNotFound {
                 client_id: client_id.clone(),
-                height,
+                height: height.clone(),
             })
     }
 
@@ -288,11 +292,13 @@ impl ChannelKeeper for IbcContext<'_> {
         &mut self,
         port_id: &PortId,
         channel_id: &ChannelId,
-        seq: Sequence,
+        seq: &Sequence,
     ) -> Result<(), PacketError> {
-        self.near_ibc_store
-            .packet_commitment
-            .remove(&(port_id.clone(), channel_id.clone(), seq));
+        self.near_ibc_store.packet_commitment.remove(&(
+            port_id.clone(),
+            channel_id.clone(),
+            seq.clone(),
+        ));
         Ok(())
     }
 
@@ -338,12 +344,12 @@ impl ChannelKeeper for IbcContext<'_> {
         &mut self,
         port_id: &PortId,
         channel_id: &ChannelId,
-        sequence: Sequence,
+        sequence: &Sequence,
     ) -> Result<(), PacketError> {
         self.near_ibc_store.packet_acknowledgement.remove(&(
             port_id.clone(),
             channel_id.clone(),
-            sequence,
+            sequence.clone(),
         ));
         Ok(())
     }
@@ -428,6 +434,6 @@ impl ChannelKeeper for IbcContext<'_> {
             .near_ibc_store
             .channel_ids_counter
             .checked_add(1)
-            .expect(format!("add channel counter overflow").as_str())
+            .expect(format!("increase channel counter overflow").as_str())
     }
 }

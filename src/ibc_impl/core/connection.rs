@@ -70,7 +70,7 @@ impl ConnectionReader for IbcContext<'_> {
     fn client_consensus_state(
         &self,
         client_id: &ClientId,
-        height: Height,
+        height: &Height,
     ) -> Result<Box<dyn ConsensusState>, ConnectionError> {
         self.consensus_state(client_id, height)
             .map_err(|e| ConnectionError::Client(e))
@@ -79,7 +79,7 @@ impl ConnectionReader for IbcContext<'_> {
     /// Returns the ConsensusState of the host (local) chain at a specific height.
     fn host_consensus_state(
         &self,
-        height: Height,
+        height: &Height,
     ) -> Result<Box<dyn ConsensusState>, ConnectionError> {
         ClientReader::host_consensus_state(self, height).map_err(ConnectionError::Client)
     }
@@ -101,7 +101,7 @@ impl ConnectionKeeper for IbcContext<'_> {
     fn store_connection(
         &mut self,
         connection_id: ConnectionId,
-        connection_end: &ConnectionEnd,
+        connection_end: ConnectionEnd,
     ) -> Result<(), ConnectionError> {
         self.near_ibc_store
             .connections
@@ -113,7 +113,7 @@ impl ConnectionKeeper for IbcContext<'_> {
     fn store_connection_to_client(
         &mut self,
         connection_id: ConnectionId,
-        client_id: &ClientId,
+        client_id: ClientId,
     ) -> Result<(), ConnectionError> {
         self.near_ibc_store
             .client_connections
@@ -125,6 +125,10 @@ impl ConnectionKeeper for IbcContext<'_> {
     /// Increases the counter which keeps track of how many connections have been created.
     /// Should never fail.
     fn increase_connection_counter(&mut self) {
-        self.near_ibc_store.connection_ids_counter += 1
+        self.near_ibc_store.connection_ids_counter = self
+            .near_ibc_store
+            .connection_ids_counter
+            .checked_add(1)
+            .expect("increase connection counter overflow");
     }
 }

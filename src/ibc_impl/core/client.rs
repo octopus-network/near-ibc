@@ -1,5 +1,7 @@
 use core::str::FromStr;
 
+use ibc::mock::consensus_state::MockConsensusState;
+use ibc::mock::header::MockHeader;
 use ibc::{
     clients::ics07_tendermint::{
         client_state::ClientState as Ics07ClientState,
@@ -26,7 +28,8 @@ use ibc_proto::{google::protobuf::Any, protobuf::Protobuf};
 use crate::context::IbcContext;
 use crate::ibc_impl::core::host::type_define::NearClientStatePath;
 use crate::ibc_impl::core::host::TENDERMINT_CLIENT_TYPE;
-use near_sdk::env;
+use crate::{KeySortLinkMap, StorageKey};
+use near_sdk::{env, log};
 
 impl ClientReader for IbcContext<'_> {
     /// Returns the ClientType for the given identifier `client_id`.
@@ -97,9 +100,14 @@ impl ClientReader for IbcContext<'_> {
     fn consensus_state(
         &self,
         client_id: &ClientId,
-        height: Height,
+        height: &Height,
     ) -> Result<Box<dyn ConsensusState>, ClientError> {
-        if let Some(data) = self.near_ibc_store.consensus_states.get(&height.into()) {
+        let consensus_states = self
+            .near_ibc_store
+            .consensus_states
+            .get(client_id)
+            .ok_or(ClientError::ImplementationSpecific)?;
+        if let Some(data) = consensus_states.get(height) {
             return match self.client_type(client_id)?.as_str() {
                 TENDERMINT_CLIENT_TYPE => {
                     let result: Ics07ConsensusState = Protobuf::<Any>::decode_vec(&data)
@@ -113,7 +121,7 @@ impl ClientReader for IbcContext<'_> {
         } else {
             Err(ClientError::ConsensusStateNotFound {
                 client_id: client_id.clone(),
-                height,
+                height: height.clone(),
             })
         }
     }
@@ -122,13 +130,14 @@ impl ClientReader for IbcContext<'_> {
     fn next_consensus_state(
         &self,
         client_id: &ClientId,
-        height: Height,
+        height: &Height,
     ) -> Result<Option<Box<dyn ConsensusState>>, ClientError> {
-        if let Some(near_consensus_state) = self
+        let consensus_states = self
             .near_ibc_store
             .consensus_states
-            .get_next(&height.into())
-        {
+            .get(client_id)
+            .ok_or(ClientError::ImplementationSpecific)?;
+        if let Some(near_consensus_state) = consensus_states.get_next(height) {
             match self.client_type(client_id)?.as_str() {
                 TENDERMINT_CLIENT_TYPE => {
                     let result: Ics07ConsensusState =
@@ -153,11 +162,14 @@ impl ClientReader for IbcContext<'_> {
     fn prev_consensus_state(
         &self,
         client_id: &ClientId,
-        height: Height,
+        height: &Height,
     ) -> Result<Option<Box<dyn ConsensusState>>, ClientError> {
-        if let Some(near_consensus_state) =
-            self.near_ibc_store.consensus_states.get_pre(&height.into())
-        {
+        let consensus_states = self
+            .near_ibc_store
+            .consensus_states
+            .get(client_id)
+            .ok_or(ClientError::ImplementationSpecific)?;
+        if let Some(near_consensus_state) = consensus_states.get_pre(height) {
             match self.client_type(client_id)?.as_str() {
                 TENDERMINT_CLIENT_TYPE => {
                     let result: Ics07ConsensusState =
@@ -186,13 +198,26 @@ impl ClientReader for IbcContext<'_> {
 
     /// Returns the `ConsensusState` of the host (local) chain at a specific height.
     /// todo impl this
-    fn host_consensus_state(&self, height: Height) -> Result<Box<dyn ConsensusState>, ClientError> {
-        Err(ClientError::ImplementationSpecific)
+    fn host_consensus_state(
+        &self,
+        height: &Height,
+    ) -> Result<Box<dyn ConsensusState>, ClientError> {
+        let mock_header = MockHeader {
+            height: self.host_height()?,
+            timestamp: Timestamp::from_nanoseconds(env::block_timestamp()).unwrap(),
+        };
+        Ok(Box::new(MockConsensusState::new(mock_header)))
+        // Err(ClientError::ImplementationSpecific)
     }
 
     /// Returns the pending `ConsensusState` of the host (local) chain.
     fn pending_host_consensus_state(&self) -> Result<Box<dyn ConsensusState>, ClientError> {
-        Err(ClientError::ImplementationSpecific)
+        let mock_header = MockHeader {
+            height: self.host_height()?,
+            timestamp: Timestamp::from_nanoseconds(env::block_timestamp()).unwrap(),
+        };
+        Ok(Box::new(MockConsensusState::new(mock_header)))
+        // Err(ClientError::ImplementationSpecific)
     }
 
     /// Returns a natural number, counting how many clients have been created thus far.
@@ -224,8 +249,7 @@ impl ClientKeeper for IbcContext<'_> {
         client_id: ClientId,
         client_state: Box<dyn ClientState>,
     ) -> Result<(), ClientError> {
-        // let client_state_path = ClientStatePath(client_id).to_string().as_bytes().to_vec();
-
+        log!("store_client_state, client_state: {:?}", client_state);
         let data = client_state
             .encode_vec()
             .map_err(|_| ClientError::ImplementationSpecific)?;
@@ -245,9 +269,24 @@ impl ClientKeeper for IbcContext<'_> {
             .encode_vec()
             .map_err(|_| ClientError::ImplementationSpecific)?;
 
+        let mut consensus_states = self
+            .near_ibc_store
+            .consensus_states
+            .get(&client_id)
+            .unwrap_or(KeySortLinkMap::new(
+                StorageKey::ConsensusStatesKey {
+                    client_id: client_id.clone(),
+                },
+                StorageKey::ConsensusStatesLink {
+                    client_id: client_id.clone(),
+                },
+            ));
+
+        consensus_states.insert_from_tail(&height, &consensus_state);
+
         self.near_ibc_store
             .consensus_states
-            .insert_from_tail(&height, &consensus_state);
+            .insert(&client_id, &consensus_states);
 
         Ok(())
     }
@@ -256,7 +295,8 @@ impl ClientKeeper for IbcContext<'_> {
     /// Increases the counter which keeps track of how many clients have been created.
     /// Should never fail.
     fn increase_client_counter(&mut self) {
-        self.near_ibc_store
+        self.near_ibc_store.client_ids_counter = self
+            .near_ibc_store
             .client_ids_counter
             .checked_add(1)
             .expect("increase client counter overflow");

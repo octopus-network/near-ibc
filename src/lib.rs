@@ -5,6 +5,7 @@
 use crate::context::{IbcContext, NearIbcStore};
 use crate::events::EventEmit;
 use crate::link_map::KeySortLinkMap;
+use ibc::core::ics24_host::identifier::ClientId;
 use ibc::core::ics26_routing::handler::MsgReceipt;
 use ibc::events::IbcEvent;
 use ibc_proto::google::protobuf::{Any, Duration};
@@ -21,14 +22,13 @@ pub mod ibc_impl;
 pub mod interfaces;
 pub mod link_map;
 pub mod types;
-pub mod utils;
 pub mod viewer;
 
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 struct Contract {
     // todo if need LazyOption?
-    ibc_store: NearIbcStore,
+    near_ibc_store: NearIbcStore,
 }
 
 #[near_bindgen]
@@ -37,10 +37,10 @@ impl Contract {
     #[init]
     pub fn init() -> Self {
         Self {
-            ibc_store: NearIbcStore {
+            near_ibc_store: NearIbcStore {
                 client_types: LookupMap::new(StorageKey::ClientTypes),
                 client_state: UnorderedMap::new(StorageKey::ClientStates),
-                consensus_states: KeySortLinkMap::new(StorageKey::ConsensusStates),
+                consensus_states: LookupMap::new(StorageKey::ConsensusStates),
                 client_processed_times: LookupMap::new(StorageKey::ClientProcessedTimes),
                 client_processed_heights: LookupMap::new(StorageKey::ClientProcessedHeights),
                 client_ids_counter: 0,
@@ -63,14 +63,14 @@ impl Contract {
 
     pub(crate) fn build_ibc_context(&mut self) -> IbcContext {
         IbcContext {
-            near_ibc_store: &mut self.ibc_store,
+            near_ibc_store: &mut self.near_ibc_store,
             router: Default::default(),
         }
     }
 
     pub fn deliver(&mut self, messages: Vec<Any>) {
         let mut ibc_context = IbcContext {
-            near_ibc_store: &mut self.ibc_store,
+            near_ibc_store: &mut self.near_ibc_store,
             router: Default::default(),
         };
 
@@ -104,6 +104,8 @@ enum StorageKey {
     ClientTypes,
     ClientStates,
     ConsensusStates,
+    ConsensusStatesKey { client_id: ClientId },
+    ConsensusStatesLink { client_id: ClientId },
     ClientProcessedTimes,
     ClientProcessedHeights,
     ClientConnections,

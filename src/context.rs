@@ -77,7 +77,7 @@ pub struct NearIbcStore {
     // pub clients: LookupMap<NearClientId, NearClientRecord>,
     pub client_types: LookupMap<ClientId, ClientType>,
     pub client_state: UnorderedMap<ClientId, NearClientState>,
-    pub consensus_states: KeySortLinkMap<Height, NearConsensusState>,
+    pub consensus_states: LookupMap<ClientId, KeySortLinkMap<Height, NearConsensusState>>,
     pub client_processed_times: LookupMap<(ClientId, Height), NearTimeStamp>,
     pub client_processed_heights: LookupMap<(ClientId, Height), IbcHostHeight>,
 
