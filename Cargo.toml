@@ -8,11 +8,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 near-sdk = "4.0.0"
-ibc = { version = "0.27.0", default-features = false, features = ["parity-scale-codec", "mocks-no-std", "serde", "borsh"]}
-#ibc-proto         = { git = "https://github.com/octopus-network/ibc-proto-rs", features = ["parity-scale-codec"], branch = "julian-dev" }
-
-#ibc = { version = "0.25.0", default-features = false, git = "https://github.com/octopus-network/ibc-rs.git", branch = "fix-mock", features = ["borsh", "mocks-primitives"]}
-ibc-proto = { version = "0.24.0", default-features = false }
+ibc = { version = "0.28.0", default-features = false, features = ["parity-scale-codec", "mocks-no-std", "serde", "borsh"]}
+ibc-proto = { version = "0.25.0", default-features = false }
 sha2 = { version = "0.10.6", default-features = false }
 itertools = "0.10.5"
 
@@ -26,3 +23,7 @@ debug = false
 panic = "abort"
 # Opt into extra safety checks on arithmetic operations https://stackoverflow.com/a/64136471/249801
 overflow-checks = true
+
+[patch.crates-io]
+ibc = { git = "https://github.com/octopus-network/ibc-rs.git", branch = "octopus-v0.28.0"}
+ibc-proto = { git = "https://github.com/octopus-network/ibc-proto-rs.git", branch = "octopus-v0.25.0" }
