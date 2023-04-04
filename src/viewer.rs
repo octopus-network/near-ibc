@@ -27,8 +27,8 @@ use near_sdk::json_types::U64;
 impl Viewer for Contract {
     fn get_latest_height(&self) -> Height {
         Height {
-            revision_height: U64(env::epoch_height()),
-            revision_number: U64(env::block_height()),
+            revision_number: U64(env::epoch_height()),
+            revision_height: U64(env::block_height()),
         }
     }
 
@@ -170,6 +170,6 @@ impl Viewer for Contract {
     }
 
     fn get_commitment_prefix(&self) -> CommitmentPrefix {
-        CommitmentPrefix::try_from(b"Ibc".to_vec()).unwrap_or_default()
+        CommitmentPrefix::try_from(b"ibc".to_vec()).unwrap_or_default()
     }
 }
