@@ -24,6 +24,7 @@ use ibc::{
     Height,
 };
 use ibc_proto::{google::protobuf::Any, protobuf::Protobuf};
+use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::context::IbcContext;
 use crate::ibc_impl::core::host::type_define::NearClientStatePath;
@@ -112,6 +113,7 @@ impl ClientReader for IbcContext<'_> {
                 TENDERMINT_CLIENT_TYPE => {
                     let result: Ics07ConsensusState = Protobuf::<Any>::decode_vec(&data)
                         .map_err(|_| ClientError::ImplementationSpecific)?;
+                    log!("Queried consensus state at {}: {:?}", height, result);
                     Ok(Box::new(result))
                 }
                 unimplemented => Err(ClientError::UnknownClientStateType {
@@ -202,12 +204,7 @@ impl ClientReader for IbcContext<'_> {
         &self,
         height: &Height,
     ) -> Result<Box<dyn ConsensusState>, ClientError> {
-        let mock_header = MockHeader {
-            height: self.host_height()?,
-            timestamp: Timestamp::from_nanoseconds(env::block_timestamp()).unwrap(),
-        };
-        Ok(Box::new(MockConsensusState::new(mock_header)))
-        // Err(ClientError::ImplementationSpecific)
+        todo!("This function cannot be implemented in smart contract for now.")
     }
 
     /// Returns the pending `ConsensusState` of the host (local) chain.

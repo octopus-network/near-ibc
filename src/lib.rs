@@ -24,9 +24,11 @@ pub mod link_map;
 pub mod types;
 pub mod viewer;
 
+pub const DEFAULT_COMMITMENT_PREFIX: &str = "ibc";
+
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
-struct Contract {
+pub struct Contract {
     // todo if need LazyOption?
     near_ibc_store: NearIbcStore,
 }

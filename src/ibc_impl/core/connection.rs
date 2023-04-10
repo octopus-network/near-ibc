@@ -1,4 +1,4 @@
-use crate::context::IbcContext;
+use crate::{context::IbcContext, DEFAULT_COMMITMENT_PREFIX};
 
 // use ibc::core::ics03_connection::error::Error as ConnectionError;
 
@@ -63,7 +63,8 @@ impl ConnectionReader for IbcContext<'_> {
 
     /// Returns the prefix that the local chain uses in the KV store.
     fn commitment_prefix(&self) -> CommitmentPrefix {
-        CommitmentPrefix::try_from(b"Ibc".to_vec()).unwrap_or_default()
+        CommitmentPrefix::try_from(DEFAULT_COMMITMENT_PREFIX.as_bytes().to_vec())
+            .unwrap_or_default()
     }
 
     /// Returns the ConsensusState that the given client stores at a specific height.

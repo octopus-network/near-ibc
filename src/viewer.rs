@@ -170,6 +170,7 @@ impl Viewer for Contract {
     }
 
     fn get_commitment_prefix(&self) -> CommitmentPrefix {
-        CommitmentPrefix::try_from(b"ibc".to_vec()).unwrap_or_default()
+        CommitmentPrefix::try_from(DEFAULT_COMMITMENT_PREFIX.as_bytes().to_vec())
+            .unwrap_or_default()
     }
 }
