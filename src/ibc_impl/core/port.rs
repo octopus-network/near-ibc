@@ -1,5 +1,6 @@
-use crate::context::IbcContext;
+use core::str::FromStr;
 
+use crate::context::NearIbcStore;
 use ibc::{
     applications::transfer::{
         MODULE_ID_STR as TRANSFER_MODULE_ID, PORT_ID_STR as TRANSFER_PORT_ID,
@@ -10,9 +11,8 @@ use ibc::{
         ics26_routing::context::ModuleId,
     },
 };
-use std::str::FromStr;
 
-impl PortReader for IbcContext<'_> {
+impl PortReader for NearIbcStore {
     /// Return the module_id associated with a given port_id
     fn lookup_module_by_port(&self, port_id: &PortId) -> Result<ModuleId, PortError> {
         match port_id.as_str() {

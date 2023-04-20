@@ -1,7 +1,10 @@
 use core::str::FromStr;
 
-use ibc::mock::consensus_state::MockConsensusState;
-use ibc::mock::header::MockHeader;
+use crate::{
+    context::NearIbcStore,
+    ibc_impl::core::host::{type_define::NearClientStatePath, TENDERMINT_CLIENT_TYPE},
+    KeySortLinkMap, StorageKey,
+};
 use ibc::{
     clients::ics07_tendermint::{
         client_state::ClientState as Ics07ClientState,
@@ -20,19 +23,17 @@ use ibc::{
             path::{ClientConsensusStatePath, ClientStatePath, ClientTypePath},
         },
     },
+    mock::{consensus_state::MockConsensusState, header::MockHeader},
     timestamp::Timestamp,
     Height,
 };
 use ibc_proto::{google::protobuf::Any, protobuf::Protobuf};
-use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
+use near_sdk::{
+    borsh::{BorshDeserialize, BorshSerialize},
+    env, log,
+};
 
-use crate::context::IbcContext;
-use crate::ibc_impl::core::host::type_define::NearClientStatePath;
-use crate::ibc_impl::core::host::TENDERMINT_CLIENT_TYPE;
-use crate::{KeySortLinkMap, StorageKey};
-use near_sdk::{env, log};
-
-impl ClientReader for IbcContext<'_> {
+impl ClientReader for NearIbcStore {
     /// Returns the ClientType for the given identifier `client_id`.
     fn client_type(&self, client_id: &ClientId) -> Result<ClientType, ClientError> {
         // let client_type_path = ClientTypePath(client_id.clone())
@@ -40,8 +41,7 @@ impl ClientReader for IbcContext<'_> {
         //     .as_bytes()
         //     .to_vec();
 
-        self.near_ibc_store
-            .client_types
+        self.client_types
             .get(&client_id)
             // .ok_or(ClientError::client_not_found(client_id.clone()))
             .ok_or(ClientError::ClientNotFound {
@@ -62,7 +62,7 @@ impl ClientReader for IbcContext<'_> {
         //     .as_bytes()
         //     .to_vec();
 
-        if let Some(client_state) = self.near_ibc_store.client_state.get(&client_id) {
+        if let Some(client_state) = self.client_state.get(&client_id) {
             return match self.client_type(client_id)?.as_str() {
                 TENDERMINT_CLIENT_TYPE => {
                     let result: Ics07ClientState = Protobuf::<Any>::decode_vec(&client_state)
@@ -104,7 +104,6 @@ impl ClientReader for IbcContext<'_> {
         height: &Height,
     ) -> Result<Box<dyn ConsensusState>, ClientError> {
         let consensus_states = self
-            .near_ibc_store
             .consensus_states
             .get(client_id)
             .ok_or(ClientError::ImplementationSpecific)?;
@@ -135,7 +134,6 @@ impl ClientReader for IbcContext<'_> {
         height: &Height,
     ) -> Result<Option<Box<dyn ConsensusState>>, ClientError> {
         let consensus_states = self
-            .near_ibc_store
             .consensus_states
             .get(client_id)
             .ok_or(ClientError::ImplementationSpecific)?;
@@ -167,7 +165,6 @@ impl ClientReader for IbcContext<'_> {
         height: &Height,
     ) -> Result<Option<Box<dyn ConsensusState>>, ClientError> {
         let consensus_states = self
-            .near_ibc_store
             .consensus_states
             .get(client_id)
             .ok_or(ClientError::ImplementationSpecific)?;
@@ -220,11 +217,11 @@ impl ClientReader for IbcContext<'_> {
     /// Returns a natural number, counting how many clients have been created thus far.
     /// The value of this counter should increase only via method `ClientKeeper::increase_client_counter`.
     fn client_counter(&self) -> Result<u64, ClientError> {
-        Ok(self.near_ibc_store.client_ids_counter)
+        Ok(self.client_ids_counter)
     }
 }
 
-impl ClientKeeper for IbcContext<'_> {
+impl ClientKeeper for NearIbcStore {
     /// Called upon successful client creation
     fn store_client_type(
         &mut self,
@@ -233,9 +230,7 @@ impl ClientKeeper for IbcContext<'_> {
     ) -> Result<(), ClientError> {
         // let client_type_path = ClientTypePath(client_id).to_string().as_bytes().to_vec();
 
-        self.near_ibc_store
-            .client_types
-            .insert(&client_id, &client_type);
+        self.client_types.insert(&client_id, &client_type);
 
         Ok(())
     }
@@ -250,7 +245,7 @@ impl ClientKeeper for IbcContext<'_> {
         let data = client_state
             .encode_vec()
             .map_err(|_| ClientError::ImplementationSpecific)?;
-        self.near_ibc_store.client_state.insert(&client_id, &data);
+        self.client_state.insert(&client_id, &data);
 
         Ok(())
     }
@@ -266,24 +261,21 @@ impl ClientKeeper for IbcContext<'_> {
             .encode_vec()
             .map_err(|_| ClientError::ImplementationSpecific)?;
 
-        let mut consensus_states = self
-            .near_ibc_store
-            .consensus_states
-            .get(&client_id)
-            .unwrap_or(KeySortLinkMap::new(
-                StorageKey::ConsensusStatesKey {
-                    client_id: client_id.clone(),
-                },
-                StorageKey::ConsensusStatesLink {
-                    client_id: client_id.clone(),
-                },
-            ));
+        let mut consensus_states =
+            self.consensus_states
+                .get(&client_id)
+                .unwrap_or(KeySortLinkMap::new(
+                    StorageKey::ConsensusStatesKey {
+                        client_id: client_id.clone(),
+                    },
+                    StorageKey::ConsensusStatesLink {
+                        client_id: client_id.clone(),
+                    },
+                ));
 
         consensus_states.insert_from_tail(&height, &consensus_state);
 
-        self.near_ibc_store
-            .consensus_states
-            .insert(&client_id, &consensus_states);
+        self.consensus_states.insert(&client_id, &consensus_states);
 
         Ok(())
     }
@@ -292,8 +284,7 @@ impl ClientKeeper for IbcContext<'_> {
     /// Increases the counter which keeps track of how many clients have been created.
     /// Should never fail.
     fn increase_client_counter(&mut self) {
-        self.near_ibc_store.client_ids_counter = self
-            .near_ibc_store
+        self.client_ids_counter = self
             .client_ids_counter
             .checked_add(1)
             .expect("increase client counter overflow");
@@ -308,8 +299,7 @@ impl ClientKeeper for IbcContext<'_> {
         height: Height,
         timestamp: Timestamp,
     ) -> Result<(), ClientError> {
-        self.near_ibc_store
-            .client_processed_times
+        self.client_processed_times
             .insert(&(client_id, height), &timestamp.nanoseconds());
         Ok(())
     }
@@ -323,8 +313,7 @@ impl ClientKeeper for IbcContext<'_> {
         height: Height,
         host_height: Height,
     ) -> Result<(), ClientError> {
-        self.near_ibc_store
-            .client_processed_heights
+        self.client_processed_heights
             .insert(&(client_id, height), &host_height.into());
         Ok(())
     }
