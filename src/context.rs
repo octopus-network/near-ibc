@@ -1,111 +1,127 @@
-use crate::ibc_impl::core::host::type_define::{
-    IbcHostHeight, NearAcknowledgementCommitment, NearAcksPath, NearChannelEnd,
-    NearChannelEndsPath, NearChannelId, NearClientId, NearClientState, NearClientStatePath,
-    NearClientType, NearClientTypePath, NearCommitmentsPath, NearConnectionEnd, NearConnectionId,
-    NearConsensusState, NearHeight, NearIbcHeight, NearModuleId, NearPacketCommitment, NearPortId,
-    NearReceipt, NearRecipientsPath, NearSeqAcksPath, NearSeqRecvsPath, NearSeqSendsPath,
-    NearSequence, NearTimeStamp,
+use core::{
+    cell::RefCell,
+    fmt::{Debug, Formatter},
+    marker::PhantomData,
 };
-use crate::ibc_impl::core::routing::{NearRouter, NearRouterBuilder};
-use crate::link_map::KeySortLinkMap;
-use crate::*;
-use ibc::core::ics02_client::client_type::ClientType;
-use ibc::core::ics02_client::height::Height;
-use ibc::core::ics03_connection::connection::ConnectionEnd;
-use ibc::core::ics04_channel::channel::ChannelEnd;
-use ibc::core::ics04_channel::commitment::{AcknowledgementCommitment, PacketCommitment};
-use ibc::core::ics04_channel::packet::{Receipt, Sequence};
-use ibc::core::ics24_host::identifier::{ChainId, ChannelId, ClientId, ConnectionId, PortId};
-use ibc::core::ics24_host::path::ClientTypePath;
+
+use crate::{
+    ibc_impl::{
+        applications::transfer::TransferModule,
+        core::{
+            host::type_define::{
+                IbcHostHeight, NearAcknowledgementCommitment, NearAcksPath, NearChannelEnd,
+                NearChannelEndsPath, NearChannelId, NearClientId, NearClientState,
+                NearClientStatePath, NearClientType, NearClientTypePath, NearCommitmentsPath,
+                NearConnectionEnd, NearConnectionId, NearConsensusState, NearHeight, NearIbcHeight,
+                NearModuleId, NearPacketCommitment, NearPortId, NearReceipt, NearRecipientsPath,
+                NearSeqAcksPath, NearSeqRecvsPath, NearSeqSendsPath, NearSequence, NearTimeStamp,
+            },
+            routing::{NearRouter, NearRouterBuilder},
+        },
+    },
+    link_map::KeySortLinkMap,
+    StorageKey,
+};
 use ibc::{
-    applications::transfer::MODULE_ID_STR,
-    core::ics26_routing::context::{Module, ModuleId, RouterBuilder},
+    applications::transfer,
+    core::{
+        ics02_client::{
+            client_state::ClientState,
+            client_type::ClientType,
+            consensus_state::ConsensusState,
+            context::{ClientKeeper, ClientReader},
+        },
+        ics03_connection::{
+            connection::ConnectionEnd,
+            context::{ConnectionKeeper, ConnectionReader},
+            error::ConnectionError,
+        },
+        ics04_channel::{
+            channel::ChannelEnd,
+            commitment::{AcknowledgementCommitment, PacketCommitment},
+            context::{ChannelKeeper, ChannelReader},
+            error::{ChannelError, PacketError},
+            packet::{Receipt, Sequence},
+        },
+        ics05_port::context::PortReader,
+        ics24_host::{
+            identifier::{ChannelId, ClientId, ConnectionId, PortId},
+            path::{
+                AcksPath, ChannelEndsPath, CommitmentsPath, ConnectionsPath, ReceiptsPath,
+                SeqAcksPath, SeqRecvsPath, SeqSendsPath,
+            },
+            Path,
+        },
+        ics26_routing::context::{Module, ModuleId, Router, RouterBuilder, RouterContext},
+    },
+    timestamp::Timestamp,
+    Height,
 };
 use ibc_proto::google::protobuf::Duration;
-use near_sdk::collections::{LookupMap, UnorderedMap};
-
-// #[derive(Debug)]
-// pub struct HostType;
-
-/// A context implementing the dependencies necessary for Any Ibc Module.
-// #[derive(Debug)]
-pub struct IbcContext<'a> {
-    /// The type of host chain underlying this Near Context.
-    // pub host_chain_type: HostType,
-
-    /// Host chain identifier.
-    /// todo confirm how to name it
-    // pub host_chain_id: ChainId,
-
-    /// Maximum size for the history of the host chain. Any block older than this is pruned.
-    /// todo the mock ibc use it when impl host_consensus_state
-    // pub max_history_size: usize,
-
-    // The chain of blocks underlying this context. A vector of size up to `max_history_size`
-    // blocks, ascending order by their height (latest block is on the last position).
-    /// todo the mock ibc use it when impl host_consensus_state
-    // history: Vec<HostBlock>,
-
-    /// Average time duration between blocks
-    /// todo not sure, maybe 1.5s?
-    // pub block_time: Duration,
-
-    /// An Object that store all Ibc related data.
-    pub near_ibc_store: &'a mut NearIbcStore,
-
-    /// Ics26 Router impl
-    pub router: NearRouter,
-}
-
-impl<'a> IbcContext<'a> {
-    pub fn new(store: &'a mut NearIbcStore) -> Self {
-        let r = NearRouterBuilder::default()
-            // todo wait for ics20
-            // .add_route(MODULE_ID_STR.parse().unwrap(), IbcTransferModule(PhantomData::<T>)) // register transfer Module
-            // .unwrap()
-            .build();
-
-        IbcContext {
-            near_ibc_store: store,
-            router: Default::default(),
-        }
-    }
-}
+use near_sdk::{
+    borsh::{self, BorshDeserialize, BorshSerialize},
+    collections::{LookupMap, UnorderedMap},
+};
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct NearIbcStore {
-    // pub clients: LookupMap<NearClientId, NearClientRecord>,
     pub client_types: LookupMap<ClientId, ClientType>,
     pub client_state: UnorderedMap<ClientId, NearClientState>,
     pub consensus_states: LookupMap<ClientId, KeySortLinkMap<Height, NearConsensusState>>,
     pub client_processed_times: LookupMap<(ClientId, Height), NearTimeStamp>,
     pub client_processed_heights: LookupMap<(ClientId, Height), IbcHostHeight>,
-
     pub client_ids_counter: u64,
-
     pub client_connections: LookupMap<ClientId, ConnectionId>,
-
     pub connections: UnorderedMap<ConnectionId, ConnectionEnd>,
-
     pub connection_ids_counter: u64,
-
     pub connection_channels: LookupMap<ConnectionId, Vec<(PortId, ChannelId)>>,
-
     pub channel_ids_counter: u64,
-
     pub channels: UnorderedMap<(PortId, ChannelId), ChannelEnd>,
-
     pub next_sequence_send: LookupMap<(PortId, ChannelId), Sequence>,
-
     pub next_sequence_recv: LookupMap<(PortId, ChannelId), Sequence>,
-
     pub next_sequence_ack: LookupMap<(PortId, ChannelId), Sequence>,
-
     pub packet_receipt: LookupMap<(PortId, ChannelId, Sequence), Receipt>,
-
     pub packet_acknowledgement: LookupMap<(PortId, ChannelId, Sequence), AcknowledgementCommitment>,
-
     pub port_to_module: LookupMap<PortId, ModuleId>,
-
     pub packet_commitment: LookupMap<(PortId, ChannelId, Sequence), PacketCommitment>,
+}
+
+pub trait NearIbcStoreHost {
+    ///
+    fn get_near_ibc_store() -> NearIbcStore {
+        let store =
+            near_sdk::env::storage_read(&StorageKey::NearIbcStore.try_to_vec().unwrap()).unwrap();
+        let store = NearIbcStore::try_from_slice(&store).unwrap();
+        store
+    }
+    ///
+    fn set_near_ibc_store(store: &NearIbcStore) {
+        let store = store.try_to_vec().unwrap();
+        near_sdk::env::storage_write(b"ibc_store", &store);
+    }
+}
+
+pub struct NearRouterContext {
+    pub near_ibc_store: NearIbcStore,
+    pub router: NearRouter,
+}
+
+impl NearRouterContext {
+    pub fn new(store: NearIbcStore) -> Self {
+        let router = NearRouterBuilder::default()
+            .add_route(transfer::MODULE_ID_STR.parse().unwrap(), TransferModule()) // register transfer Module
+            .unwrap()
+            .build();
+
+        Self {
+            near_ibc_store: store,
+            router,
+        }
+    }
+}
+
+impl Debug for NearIbcStore {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        write!(f, "NearIbcStore {{ ... }}")
+    }
 }

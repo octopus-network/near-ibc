@@ -1,6 +1,4 @@
-use crate::context::IbcContext;
-
-// use ibc::core::ics03_connection::error::Error as ConnectionError;
+use crate::{context::NearIbcStore, DEFAULT_COMMITMENT_PREFIX};
 
 use ibc::{
     core::{
@@ -23,11 +21,10 @@ use ibc::{
 use ibc_proto::{google::protobuf::Any, protobuf::Protobuf};
 use near_sdk::env;
 
-impl ConnectionReader for IbcContext<'_> {
+impl ConnectionReader for NearIbcStore {
     /// Returns the ConnectionEnd for the given identifier `conn_id`.
     fn connection_end(&self, conn_id: &ConnectionId) -> Result<ConnectionEnd, ConnectionError> {
-        self.near_ibc_store
-            .connections
+        self.connections
             .get(&conn_id)
             .ok_or(ConnectionError::ConnectionMismatch {
                 connection_id: conn_id.clone(),
@@ -63,7 +60,8 @@ impl ConnectionReader for IbcContext<'_> {
 
     /// Returns the prefix that the local chain uses in the KV store.
     fn commitment_prefix(&self) -> CommitmentPrefix {
-        CommitmentPrefix::try_from(b"Ibc".to_vec()).unwrap_or_default()
+        CommitmentPrefix::try_from(DEFAULT_COMMITMENT_PREFIX.as_bytes().to_vec())
+            .unwrap_or_default()
     }
 
     /// Returns the ConsensusState that the given client stores at a specific height.
@@ -88,7 +86,7 @@ impl ConnectionReader for IbcContext<'_> {
     /// The value of this counter should increase only via method
     /// `ConnectionKeeper::increase_connection_counter`.
     fn connection_counter(&self) -> Result<u64, ConnectionError> {
-        Ok(self.near_ibc_store.connection_ids_counter)
+        Ok(self.connection_ids_counter)
     }
 
     fn validate_self_client(&self, counterparty_client_state: Any) -> Result<(), ConnectionError> {
@@ -96,16 +94,14 @@ impl ConnectionReader for IbcContext<'_> {
     }
 }
 
-impl ConnectionKeeper for IbcContext<'_> {
+impl ConnectionKeeper for NearIbcStore {
     /// Stores the given connection_end at a path associated with the connection_id.
     fn store_connection(
         &mut self,
         connection_id: ConnectionId,
         connection_end: ConnectionEnd,
     ) -> Result<(), ConnectionError> {
-        self.near_ibc_store
-            .connections
-            .insert(&connection_id, &connection_end);
+        self.connections.insert(&connection_id, &connection_end);
         Ok(())
     }
 
@@ -115,9 +111,7 @@ impl ConnectionKeeper for IbcContext<'_> {
         connection_id: ConnectionId,
         client_id: ClientId,
     ) -> Result<(), ConnectionError> {
-        self.near_ibc_store
-            .client_connections
-            .insert(&client_id, &connection_id);
+        self.client_connections.insert(&client_id, &connection_id);
         Ok(())
     }
 
@@ -125,8 +119,7 @@ impl ConnectionKeeper for IbcContext<'_> {
     /// Increases the counter which keeps track of how many connections have been created.
     /// Should never fail.
     fn increase_connection_counter(&mut self) {
-        self.near_ibc_store.connection_ids_counter = self
-            .near_ibc_store
+        self.connection_ids_counter = self
             .connection_ids_counter
             .checked_add(1)
             .expect("increase connection counter overflow");

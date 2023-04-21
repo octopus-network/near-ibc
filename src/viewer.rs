@@ -27,13 +27,14 @@ use near_sdk::json_types::U64;
 impl Viewer for Contract {
     fn get_latest_height(&self) -> Height {
         Height {
-            revision_height: U64(env::epoch_height()),
-            revision_number: U64(env::block_height()),
+            revision_number: U64(env::epoch_height()),
+            revision_height: U64(env::block_height()),
         }
     }
 
     fn get_connection_end(&self, connection_id: ConnectionId) -> ConnectionEnd {
-        self.near_ibc_store
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store
             .connections
             .get(&connection_id)
             .ok_or(ConnectionError::ConnectionMismatch {
@@ -43,11 +44,13 @@ impl Viewer for Contract {
     }
 
     fn get_connection_ends(&self) -> Vec<(ConnectionId, ConnectionEnd)> {
-        self.near_ibc_store.connections.to_vec()
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store.connections.to_vec()
     }
 
     fn get_channel_end(&self, port_id: PortId, channel_id: ChannelId) -> ChannelEnd {
-        self.near_ibc_store
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store
             .channels
             .get(&(port_id.clone(), channel_id.clone()))
             .ok_or(ChannelError::ChannelNotFound {
@@ -58,14 +61,15 @@ impl Viewer for Contract {
     }
 
     fn get_client_state(&self, client_id: ClientId) -> Vec<u8> {
-        let option = self.near_ibc_store.client_state.get(&client_id);
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        let option = near_ibc_store.client_state.get(&client_id);
         log!("get_client_state with {:?},result: {:?}", client_id, option);
         option.unwrap()
     }
 
     fn get_client_consensus(&self, client_id: ClientId, consensus_height: Height) -> Vec<u8> {
-        let option = self
-            .near_ibc_store
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        let option = near_ibc_store
             .consensus_states
             .get(&client_id)
             .unwrap()
@@ -114,11 +118,13 @@ impl Viewer for Contract {
     }
 
     fn get_client_counter(&self) -> u64 {
-        self.near_ibc_store.client_ids_counter
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store.client_ids_counter
     }
 
     fn get_connections(&self) -> Vec<IdentifiedConnectionEnd> {
-        self.near_ibc_store
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store
             .connections
             .iter()
             .map(|(connection_id, connection_end)| IdentifiedConnectionEnd {
@@ -130,7 +136,8 @@ impl Viewer for Contract {
 
     /// ignore pagination now, return all datas
     fn get_channels(&self, request: QueryChannelsRequest) -> Vec<IdentifiedChannelEnd> {
-        self.near_ibc_store
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store
             .channels
             .iter()
             .map(
@@ -170,6 +177,7 @@ impl Viewer for Contract {
     }
 
     fn get_commitment_prefix(&self) -> CommitmentPrefix {
-        CommitmentPrefix::try_from(b"Ibc".to_vec()).unwrap_or_default()
+        CommitmentPrefix::try_from(DEFAULT_COMMITMENT_PREFIX.as_bytes().to_vec())
+            .unwrap_or_default()
     }
 }
