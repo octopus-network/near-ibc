@@ -4,33 +4,33 @@ An implementation of IBC protocol (IBC/TAO and some applications, like ICS-20 et
 
 ## Implementation of IBC/TAO
 
-Crate `near-ibc` is a NEAR smart contract. It includes the implemenation of interfaces (traits) defined in [ibc-rs](https://github.com/cosmos/ibc-rs) which are needed for basic IBC/TAO processes. This contract also provides view functions for IBC relayer [hermes](https://github.com/informalsystems/hermes) to query state of hosted clients, connections, channels and other necessary IBC data.
+Crate `near-ibc` is a NEAR smart contract. It includes the implementation of interfaces (traits) defined in [ibc-rs](https://github.com/cosmos/ibc-rs) which are needed for basic IBC/TAO processes. This contract also provides view functions for IBC relayer [hermes](https://github.com/informalsystems/hermes) to query state of hosted clients, connections, channels and other necessary IBC data.
 
 ## Implementation of ICS-20
 
 The implementation of module `transfer` (ICS-20) is also included in crate `near-ibc` to minimize the impact to current implementation of `ibc-rs`.
 
-Our implemenation of trait `BankKeeper` uses sub-accounts mechanism of NEAR protocol. The general design is as the following:
+Our implementation of trait `BankKeeper` uses sub-accounts mechanism of NEAR protocol. The general design is as the following:
 
 ![NEAR IBC accounts](/images/near-ibc-accounts.png)
 
 ### Root account
 
-The root account will be deployed by the wasm of crate `near-ibc`. It includes the whole implementation of IBC/TAO and module `transfer` (ICS-20).
+The root account will be deployed by the wasm of crate `near-ibc`. It includes the whole implementation of IBC/TAO and application module `transfer` (ICS-20).
 
 ### Sub account `transfer`
 
 Full account id: `transfer.<root account>`.
 
-This level of sub-accounts are reserved for modules in IBC protocol. In our implementation of ICS-20, this sub-account doesn't need to be deploy any smart contract code. It's only acting as placeholder.
+The sub-accounts at this level are reserved for applications (modules) in IBC protocol. In our implementation of ICS-20, this sub-account doesn't need to be deployed by any smart contract code. It's only acting as placeholder.
 
 ### Sub account `token-factory`
 
 Full account id: `tf.transfer.<root account>`.
 
-This account is a smart contract for deploying token contracts for assets transfered by module `transfer`. It is implemented by crate `token-factory`.
+This account is for deploying token contracts for assets from other chains. The contract in this account is implemented by crate `token-factory`.
 
-This contract will at least provide the following interfaces (functions):
+The contract `token-factory` will at least provide the following interfaces (functions):
 
 * Function `mint_asset`:
   * This function can ONLY be called from root account.
@@ -47,9 +47,9 @@ This contract will at least provide the following interfaces (functions):
 
 Full account id: `<asset id>.tf.transfer.<root account>`, where the `asset id` is the leftmost 128 bits of sha256 hash of the denomination of a certain cross-chain asset, in hex format. So the length of the whole account id will be `32 + 13 + (length of root account id)`, which can be controlled not longer than `64`.
 
-This account is for minting and burning cross-chain assets which are NOT native in NEAR protocol. It is implemented by crate `wrapped-token`.
+This account is for minting and burning cross-chain assets which are NOT native in NEAR protocol. The contract in this account is implemented by crate `wrapped-token`.
 
-This contract will at least provide the following interfaces (functions):
+The contract `wrapped-token` will at least provide the following interfaces (functions):
 
 * Function `mint`:
   * This function can ONLY be called from sub-account `token-factory` (the previous level of current account id).
@@ -62,9 +62,9 @@ This contract will at least provide the following interfaces (functions):
 
 Full account id: `ef.transfer.<root account>`.
 
-This account is a smart contract for deploying escrow contracts for assets transfered by module `transfer`. It is implemented by crate `escrow-factory`.
+This account is for deploying escrow contracts for assets native in NEAR protocol. The contract in this account is implemented by crate `escrow-factory`.
 
-This contract will at least provide the following interfaces (functions):
+The contract `escrow-factory` will at least provide the following interfaces (functions):
 
 * Function `create_escrow`:
   * This function can ONLY be called from root account.
@@ -75,13 +75,14 @@ This contract will at least provide the following interfaces (functions):
 
 Full account id: `<channel id>.ef.transfer.<root account>`.
 
-This account is for receiving/locking NEP-141 assets which are native in NEAR protocol when they are transfered out of NEAR protocol, and for transfering/unlocking these NEP-141 assets when they are transfered back to NEAR protocol. It is implemented by crate `channel-escrow`.
+This account is for receiving/locking NEP-141 assets which are native in NEAR protocol when they are transferred out of NEAR protocol, and for transferring/unlocking these NEP-141 assets when they are transferred back to NEAR protocol. The contract in this account is implemented by crate `channel-escrow`.
 
-This contract will at least provide the following interfaces (functions):
+The contract `channel-escrow` will at least provide the following interfaces (functions):
 
 * Function `ft_on_transfer`:
   * This function is for receiving assets (which's source chain is NEAR protocol) from NEAR protocol. It is acting as a callback of the calling of function `ft_transfer_call` of any NEP-141 contract.
+  * This function will generate a certain IBC event or call a certain function of contract `near-ibc` in root account to start the process for transferring NEAR native assets to other chains. **(TBD)**
 * Function `transfer`:
   * This function can ONLY be called from root account.
   * This function will transfer a certain amount of previously locked NEP-141 tokens to a certain receiver in NEAR protocol.
-  * This function will generate a certain IBC event to inform relayer that a certain amount of previously locked NEP-141 tokens are transfered.
+  * This function will generate a certain IBC event to inform relayer that a certain amount of previously locked NEP-141 tokens are transferred.
