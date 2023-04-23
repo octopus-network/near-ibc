@@ -36,7 +36,7 @@ The contract `token-factory` will at least provide the following interfaces (fun
   * This function can ONLY be called from root account.
   * This function will be called in function `BankKeeper::mint_coins` which is implemented by module `transfer`.
   * This function will check whether the sub-account for the asset corresponding to the `denomination` of the coin (passed by the caller) is existed. If not, a new sub-account will be created and initialized automatically. Then the function `mint` of the contract of the sub-account will be called automatically. (Also refer to [sub-accounts for assets from other chains](#sub-accounts-for-assets-from-other-chains).)
-  * When it is necessary to create sub-account for a new asset, this function will also check the duplication for both `denomination` and `asset id` (refer to [sub-accounts for assets from other chains](#sub-accounts-for-assets-from-other-chains)) to avoid hash collisions. Besides, the mappings of `denomination` and `asset id` are also be stored in this contract.
+  * When it is necessary to create sub-account for a new asset, this function will also check for duplication of both `denomination` and `asset id` (refer to [sub-accounts for assets from other chains](#sub-accounts-for-assets-from-other-chains)) in order to avoid hash collisions. Besides, the mappings of `denomination` and `asset id` are also be stored in this contract.
 * Function `burn_asset`:
   * This function can ONLY be called from root account.
   * This function will be called in function `BankKeeper::burn_coins` which is implemented by module `transfer`.
@@ -84,5 +84,5 @@ The contract `channel-escrow` will at least provide the following interfaces (fu
   * This function will generate a certain IBC event or call a certain function of contract `near-ibc` in root account to start the process for transferring NEAR native assets to other chains. **(TBD)**
 * Function `transfer`:
   * This function can ONLY be called from root account.
-  * This function will transfer a certain amount of previously locked NEP-141 tokens to a certain receiver in NEAR protocol.
+  * This function will be called in function `BankKeeper::send_coins` which is implemented by module `transfer`. It will transfer a certain amount of previously locked NEP-141 tokens to a certain receiver in NEAR protocol.
   * This function will generate a certain IBC event to inform relayer that a certain amount of previously locked NEP-141 tokens are transferred.
