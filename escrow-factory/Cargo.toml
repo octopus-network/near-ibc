@@ -1,5 +1,5 @@
 [package]
-name = "token-factory"
+name = "escrow-factory"
 version = "0.1.0"
 edition = "2021"
 

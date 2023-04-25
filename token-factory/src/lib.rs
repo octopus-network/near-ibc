@@ -20,8 +20,8 @@ const GAS_FOR_TOKEN_CONTRACT_BURN: Gas = Gas(5_000_000_000_000);
 
 #[derive(BorshSerialize, BorshStorageKey)]
 pub enum StorageKey {
-    AssetIdSet,
     AssetIdMappings,
+    DenomMappings,
     TokenContractWasm,
 }
 
@@ -49,8 +49,8 @@ impl TokenFactory {
             "ERR_CONTRACT_MUST_BE_DEPLOYED_IN_SUB_ACCOUNT",
         );
         Self {
-            asset_id_mappings: UnorderedMap::new(StorageKey::AssetIdSet),
-            denom_mappings: UnorderedMap::new(StorageKey::AssetIdMappings),
+            asset_id_mappings: UnorderedMap::new(StorageKey::AssetIdMappings),
+            denom_mappings: UnorderedMap::new(StorageKey::DenomMappings),
         }
     }
     //
