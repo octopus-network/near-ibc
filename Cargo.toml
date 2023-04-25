@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "near-ibc",
+    "token-factory",
     "wrapped-token",
 ]
 
