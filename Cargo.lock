@@ -840,6 +840,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "near-contract-standards"
+version = "4.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bacc932e79b26472797adfb21689294b6f90960d1570daaf1e0b682b59fcb35"
+dependencies = [
+ "near-sdk",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "near-crypto"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2084,6 +2096,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae8970b36c66498d8ff1d66685dc86b91b29db0c7739899012f63a63814b4b28"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "wrapped-token"
+version = "0.1.0"
+dependencies = [
+ "near-contract-standards",
+ "near-sdk",
 ]
 
 [[package]]
