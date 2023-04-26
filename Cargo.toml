@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "channel-escrow",
     "escrow-factory",
     "near-ibc",
     "token-factory",

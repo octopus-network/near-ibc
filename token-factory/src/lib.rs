@@ -42,6 +42,7 @@ pub struct TokenFactory {
 impl TokenFactory {
     #[init]
     pub fn new() -> Self {
+        assert!(!env::state_exists(), "ERR_ALREADY_INITIALIZED");
         let account_id = String::from(env::current_account_id().as_str());
         let parts = account_id.split(".").collect::<Vec<&str>>();
         assert!(
@@ -53,18 +54,8 @@ impl TokenFactory {
             denom_mappings: UnorderedMap::new(StorageKey::DenomMappings),
         }
     }
-    //
-    fn assert_root_account(&self) {
-        let account_id = String::from(env::current_account_id().as_str());
-        let parts = account_id.split(".").collect::<Vec<&str>>();
-        let root_account = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
-        assert_eq!(
-            env::predecessor_account_id().to_string(),
-            root_account,
-            "ERR_ONLY_ROOT_ACCOUNT_CAN_CALL_THIS_METHOD"
-        );
-    }
-    ///
+    /// Create a new token contract and mint the given amount of tokens to the given owner.
+    #[payable]
     pub fn mint_asset(
         &mut self,
         trace_path: Vec<(PortId, ChannelId)>,
@@ -72,11 +63,19 @@ impl TokenFactory {
         token_owner: AccountId,
         amount: U128,
     ) {
-        self.assert_root_account();
+        assert_root_account();
         let asset_denom = AssetDenom {
             trace_path,
             base_denom,
         };
+        assert!(
+            env::attached_deposit()
+                > env::storage_byte_cost()
+                    * (asset_denom.try_to_vec().unwrap().len() + 32) as u128
+                    * 2,
+            "ERR_NOT_ENOUGH_DEPOSIT"
+        );
+        let used_bytes = env::storage_usage();
         if !self.denom_mappings.contains_key(&asset_denom) {
             // Generate asset id.
             let mut asset_id =
@@ -141,6 +140,7 @@ impl TokenFactory {
             0,
             GAS_FOR_TOKEN_CONTRACT_MINT,
         );
+        refund_deposit(used_bytes);
     }
     ///
     pub fn burn_asset(
@@ -150,7 +150,7 @@ impl TokenFactory {
         token_owner: AccountId,
         amount: U128,
     ) {
-        self.assert_root_account();
+        assert_root_account();
         let asset_denom = AssetDenom {
             trace_path,
             base_denom,
@@ -182,6 +182,28 @@ impl TokenFactory {
             0,
             GAS_FOR_TOKEN_CONTRACT_BURN,
         );
+    }
+}
+
+/// Asserts that the predecessor account is the root account.
+fn assert_root_account() {
+    let account_id = String::from(env::current_account_id().as_str());
+    let parts = account_id.split(".").collect::<Vec<&str>>();
+    let root_account = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
+    assert_eq!(
+        env::predecessor_account_id().to_string(),
+        root_account,
+        "ERR_ONLY_ROOT_ACCOUNT_CAN_CALL_THIS_METHOD"
+    );
+}
+
+/// Refunds deposit if it is more than used for storage.
+fn refund_deposit(previously_used_bytes: u64) {
+    if env::storage_usage() > previously_used_bytes {
+        let newly_used_bytes = env::storage_usage() - previously_used_bytes;
+        let refund_amount =
+            env::attached_deposit() - env::storage_byte_cost() * newly_used_bytes as u128;
+        Promise::new(env::predecessor_account_id()).transfer(refund_amount);
     }
 }
 

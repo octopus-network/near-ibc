@@ -29,6 +29,7 @@ pub struct EscrowFactory {
 impl EscrowFactory {
     #[init]
     pub fn new() -> Self {
+        assert!(!env::state_exists(), "ERR_ALREADY_INITIALIZED");
         let account_id = String::from(env::current_account_id().as_str());
         let parts = account_id.split(".").collect::<Vec<&str>>();
         assert!(

@@ -1,0 +1,12 @@
+[package]
+name = "channel-escrow"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "4.1.0"
+ibc = { version = "0.28.0", default-features = false, features = ["parity-scale-codec", "mocks-no-std", "serde", "borsh"]}
+hex = "0.4"
