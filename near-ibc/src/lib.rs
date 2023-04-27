@@ -7,12 +7,12 @@ use core::str::FromStr;
 use crate::{
     context::{NearIbcStore, NearRouterContext},
     events::EventEmit,
-    link_map::KeySortLinkMap,
+    indexed_lookup_queue::IndexedLookupQueue,
 };
 use ibc::{
     applications::transfer,
     core::{
-        ics24_host::identifier::{ClientId, PortId},
+        ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
         ics26_routing::context::RouterBuilder,
         ics26_routing::handler::MsgReceipt,
     },
@@ -23,19 +23,20 @@ use ibc_proto::google::protobuf::{Any, Duration};
 use itertools::Itertools;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    collections::{LazyOption, LookupMap, UnorderedMap},
+    collections::LazyOption,
     env,
     json_types::Base64VecU8,
     log, near_bindgen,
     serde::{Deserialize, Serialize},
-    serde_json, AccountId, BorshStorageKey, PanicOnDefault,
+    serde_json,
+    store::{LookupMap, UnorderedMap},
+    AccountId, BorshStorageKey, PanicOnDefault,
 };
 
 pub mod context;
 pub mod events;
 pub mod ibc_impl;
-pub mod interfaces;
-pub mod link_map;
+pub mod indexed_lookup_queue;
 pub mod types;
 pub mod viewer;
 
@@ -57,7 +58,7 @@ impl Contract {
                 StorageKey::NearIbcStore,
                 Some(&NearIbcStore {
                     client_types: LookupMap::new(StorageKey::ClientTypes),
-                    client_state: UnorderedMap::new(StorageKey::ClientStates),
+                    client_states: UnorderedMap::new(StorageKey::ClientStates),
                     consensus_states: LookupMap::new(StorageKey::ConsensusStates),
                     client_processed_times: LookupMap::new(StorageKey::ClientProcessedTimes),
                     client_processed_heights: LookupMap::new(StorageKey::ClientProcessedHeights),
@@ -116,21 +117,67 @@ pub enum StorageKey {
     ClientTypes,
     ClientStates,
     ConsensusStates,
-    ConsensusStatesKey { client_id: ClientId },
-    ConsensusStatesLink { client_id: ClientId },
+    ConsensusStatesIndex {
+        client_id: ClientId,
+    },
+    ConsensusStatesKey {
+        client_id: ClientId,
+    },
     ClientProcessedTimes,
+    ClientProcessedTimesIndex {
+        client_id: ClientId,
+    },
+    ClientProcessedTimesKey {
+        client_id: ClientId,
+    },
     ClientProcessedHeights,
+    ClientProcessedHeightsIndex {
+        client_id: ClientId,
+    },
+    ClientProcessedHeightsKey {
+        client_id: ClientId,
+    },
     ClientConnections,
+    ClientConnectionsVector {
+        client_id: ClientId,
+    },
     Connections,
+    PortToModule,
     ConnectionChannels,
+    ConnectionChannelsVector {
+        connection_id: ConnectionId,
+    },
     Channels,
     NextSequenceSend,
     NextSequenceRecv,
     NextSequenceAck,
     PacketReceipt,
+    PacketReceiptIndex {
+        port_id: PortId,
+        channel_id: ChannelId,
+    },
+    PacketReceiptKey {
+        port_id: PortId,
+        channel_id: ChannelId,
+    },
     PacketAcknowledgement,
-    PortToModule,
+    PacketAcknowledgementIndex {
+        port_id: PortId,
+        channel_id: ChannelId,
+    },
+    PacketAcknowledgementKey {
+        port_id: PortId,
+        channel_id: ChannelId,
+    },
     PacketCommitment,
+    PacketCommitmentIndex {
+        port_id: PortId,
+        channel_id: ChannelId,
+    },
+    PacketCommitmentKey {
+        port_id: PortId,
+        channel_id: ChannelId,
+    },
     NearIbcStore,
 }
 
@@ -144,13 +191,13 @@ impl Contract {
         );
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
 
-        for client_id in near_ibc_store.client_state.keys() {
+        for client_id in near_ibc_store.client_states.keys() {
             near_ibc_store.client_types.remove(&client_id);
             near_ibc_store.client_connections.remove(&client_id);
             near_ibc_store.consensus_states.remove(&client_id);
             near_ibc_store.client_connections.remove(&client_id);
         }
-        near_ibc_store.client_state.clear();
+        near_ibc_store.client_states.clear();
         for connection_id in near_ibc_store.connections.keys() {
             near_ibc_store.connection_channels.remove(&connection_id);
         }
