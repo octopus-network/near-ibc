@@ -145,7 +145,7 @@ impl ChannelReader for NearIbcStore {
         channel_id: &ChannelId,
         sequence: &Sequence,
     ) -> Result<PacketCommitment, PacketError> {
-        self.packet_commitment
+        self.packet_commitments
             .get(&(port_id.clone(), channel_id.clone()))
             .ok_or(PacketError::PacketCommitmentNotFound {
                 sequence: sequence.clone(),
@@ -163,7 +163,7 @@ impl ChannelReader for NearIbcStore {
         channel_id: &ChannelId,
         sequence: &Sequence,
     ) -> Result<Receipt, PacketError> {
-        self.packet_receipt
+        self.packet_receipts
             .get(&(port_id.clone(), channel_id.clone()))
             .ok_or(PacketError::PacketReceiptNotFound {
                 sequence: sequence.clone(),
@@ -181,7 +181,7 @@ impl ChannelReader for NearIbcStore {
         channel_id: &ChannelId,
         sequence: &Sequence,
     ) -> Result<AcknowledgementCommitment, PacketError> {
-        self.packet_acknowledgement
+        self.packet_acknowledgements
             .get(&(port_id.clone(), channel_id.clone()))
             .ok_or(PacketError::PacketAcknowledgementNotFound {
                 sequence: sequence.clone(),
@@ -286,7 +286,7 @@ impl ChannelKeeper for NearIbcStore {
         commitment: PacketCommitment,
     ) -> Result<(), PacketError> {
         if let Some(commitments) = self
-            .packet_commitment
+            .packet_commitments
             .get_mut(&(port_id.clone(), channel_id.clone()))
         {
             commitments.push_back((sequence, commitment));
@@ -303,7 +303,7 @@ impl ChannelKeeper for NearIbcStore {
                 u64::MAX,
             );
             commitments.push_back((sequence, commitment));
-            self.packet_commitment
+            self.packet_commitments
                 .insert((port_id.clone(), channel_id.clone()), commitments);
         }
         Ok(())
@@ -316,7 +316,7 @@ impl ChannelKeeper for NearIbcStore {
         seq: &Sequence,
     ) -> Result<(), PacketError> {
         if let Some(commitments) = self
-            .packet_commitment
+            .packet_commitments
             .get_mut(&(port_id.clone(), channel_id.clone()))
         {
             commitments.remove_by_key(seq);
@@ -336,7 +336,7 @@ impl ChannelKeeper for NearIbcStore {
         receipt: Receipt,
     ) -> Result<(), PacketError> {
         if let Some(receipts) = self
-            .packet_receipt
+            .packet_receipts
             .get_mut(&(port_id.clone(), channel_id.clone()))
         {
             receipts.push_back((sequence, receipt));
@@ -353,7 +353,7 @@ impl ChannelKeeper for NearIbcStore {
                 u64::MAX,
             );
             receipts.push_back((sequence, receipt));
-            self.packet_receipt
+            self.packet_receipts
                 .insert((port_id.clone(), channel_id.clone()), receipts);
         }
         Ok(())
@@ -367,7 +367,7 @@ impl ChannelKeeper for NearIbcStore {
         ack_commitment: AcknowledgementCommitment,
     ) -> Result<(), PacketError> {
         if let Some(acknowledgments) = self
-            .packet_acknowledgement
+            .packet_acknowledgements
             .get_mut(&(port_id.clone(), channel_id.clone()))
         {
             acknowledgments.push_back((sequence, ack_commitment));
@@ -384,7 +384,7 @@ impl ChannelKeeper for NearIbcStore {
                 u64::MAX,
             );
             acknowledgments.push_back((sequence, ack_commitment));
-            self.packet_acknowledgement
+            self.packet_acknowledgements
                 .insert((port_id.clone(), channel_id.clone()), acknowledgments);
         }
         Ok(())
@@ -397,7 +397,7 @@ impl ChannelKeeper for NearIbcStore {
         sequence: &Sequence,
     ) -> Result<(), PacketError> {
         if let Some(acknowledgements) = self
-            .packet_acknowledgement
+            .packet_acknowledgements
             .get_mut(&(port_id.clone(), channel_id.clone()))
         {
             acknowledgements.remove_by_key(sequence);

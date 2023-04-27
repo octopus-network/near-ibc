@@ -22,25 +22,30 @@ use ibc_impl::{applications::transfer::TransferModule, core::routing::NearRouter
 use ibc_proto::google::protobuf::{Any, Duration};
 use itertools::Itertools;
 use near_sdk::{
+    assert_self,
     borsh::{self, BorshDeserialize, BorshSerialize},
     collections::LazyOption,
     env,
-    json_types::Base64VecU8,
+    json_types::{Base64VecU8, U128, U64},
     log, near_bindgen,
     serde::{Deserialize, Serialize},
     serde_json,
     store::{LookupMap, UnorderedMap},
-    AccountId, BorshStorageKey, PanicOnDefault,
+    AccountId, BorshStorageKey, Gas, PanicOnDefault, Promise,
 };
 
 pub mod context;
 pub mod events;
 pub mod ibc_impl;
 pub mod indexed_lookup_queue;
-pub mod types;
 pub mod viewer;
 
 pub const DEFAULT_COMMITMENT_PREFIX: &str = "ibc";
+/// As the `deliver` function may cause storage changes, the caller needs to attach some NEAR
+/// to cover the storage cost. The minimum valid amount is 0.01 NEAR (for 1 kb storage).
+const MINIMUM_ATTACHED_NEAR_FOR_DELEVER_MSG: u128 = 10_000_000_000_000_000_000_000;
+/// Gas for calling `check_refund` function.
+const GAS_FOR_CHECK_REFUND: Gas = Gas(15_000_000_000_000);
 
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
@@ -72,16 +77,23 @@ impl Contract {
                     next_sequence_send: LookupMap::new(StorageKey::NextSequenceSend),
                     next_sequence_recv: LookupMap::new(StorageKey::NextSequenceRecv),
                     next_sequence_ack: LookupMap::new(StorageKey::NextSequenceAck),
-                    packet_receipt: LookupMap::new(StorageKey::PacketReceipt),
-                    packet_acknowledgement: LookupMap::new(StorageKey::PacketAcknowledgement),
+                    packet_receipts: LookupMap::new(StorageKey::PacketReceipt),
+                    packet_acknowledgements: LookupMap::new(StorageKey::PacketAcknowledgement),
                     port_to_module: LookupMap::new(StorageKey::PortToModule),
-                    packet_commitment: LookupMap::new(StorageKey::PacketCommitment),
+                    packet_commitments: LookupMap::new(StorageKey::PacketCommitment),
                 }),
             ),
         }
     }
-
+    ///
+    #[payable]
     pub fn deliver(&mut self, messages: Vec<Any>) {
+        assert!(
+            env::attached_deposit() >= MINIMUM_ATTACHED_NEAR_FOR_DELEVER_MSG,
+            "Need to attach at least 0.1 NEAR to cover the possible storage cost."
+        );
+        let used_bytes = env::storage_usage();
+        // Deliver messages to `ibc-rs`
         let near_ibc_store = self.near_ibc_store.get().unwrap();
 
         let mut router_context = NearRouterContext::new(near_ibc_store);
@@ -109,6 +121,45 @@ impl Contract {
         for event in events {
             event.emit();
         }
+        // Check and fefund the unused attached deposit by a promise function call.
+        #[derive(Serialize, Deserialize, Clone)]
+        #[serde(crate = "near_sdk::serde")]
+        struct Input {
+            pub caller: AccountId,
+            pub attached_deposit: U128,
+            pub used_bytes: U64,
+        }
+        let args = Input {
+            caller: env::predecessor_account_id(),
+            attached_deposit: U128(env::attached_deposit()),
+            used_bytes: U64(used_bytes),
+        };
+        let args =
+            near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_FUNCTION");
+        Promise::new(env::current_account_id()).function_call(
+            "check_refund".to_string(),
+            args,
+            0,
+            GAS_FOR_CHECK_REFUND,
+        );
+    }
+    /// Check the storage usage and refund the unused attached deposit.
+    pub fn check_refund(&mut self, caller: AccountId, attached_deposit: U128, used_bytes: U64) {
+        assert_self();
+        let mut refund_amount = attached_deposit.0;
+        if env::storage_usage() > used_bytes.0 {
+            log!(
+                "near ibc deliver storage usage: {}",
+                env::storage_usage() - used_bytes.0
+            );
+            let cost = env::storage_byte_cost() * (env::storage_usage() - used_bytes.0) as u128;
+            if cost >= refund_amount {
+                return;
+            } else {
+                refund_amount -= cost;
+            }
+        }
+        Promise::new(caller).transfer(refund_amount);
     }
 }
 
@@ -179,41 +230,6 @@ pub enum StorageKey {
         channel_id: ChannelId,
     },
     NearIbcStore,
-}
-
-#[near_bindgen]
-impl Contract {
-    pub fn clear_near_ibc_store(&mut self) {
-        near_sdk::assert_self();
-        assert!(
-            !env::current_account_id().to_string().ends_with(".near"),
-            "This function can not be called on mainnet."
-        );
-        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
-
-        for client_id in near_ibc_store.client_states.keys() {
-            near_ibc_store.client_types.remove(&client_id);
-            near_ibc_store.client_connections.remove(&client_id);
-            near_ibc_store.consensus_states.remove(&client_id);
-            near_ibc_store.client_connections.remove(&client_id);
-        }
-        near_ibc_store.client_states.clear();
-        for connection_id in near_ibc_store.connections.keys() {
-            near_ibc_store.connection_channels.remove(&connection_id);
-        }
-        near_ibc_store.connections.clear();
-        near_ibc_store.channel_ids_counter = 0;
-        for channel_id in near_ibc_store.channels.keys() {
-            near_ibc_store.next_sequence_send.remove(&channel_id);
-            near_ibc_store.next_sequence_recv.remove(&channel_id);
-            near_ibc_store.next_sequence_ack.remove(&channel_id);
-        }
-        near_ibc_store.channels.clear();
-        let port_id = PortId::from_str("transfer").unwrap();
-        near_ibc_store.port_to_module.remove(&port_id);
-
-        self.near_ibc_store.set(&near_ibc_store);
-    }
 }
 
 #[no_mangle]

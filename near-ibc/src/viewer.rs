@@ -1,24 +1,24 @@
 use crate::*;
-use crate::{
-    ibc_impl::core::host::type_define::RawConsensusState,
-    types::{Height, Receipt},
-    Contract,
-};
-use ibc::core::{
-    ics02_client::context::ClientReader,
-    ics03_connection::{
-        connection::{ConnectionEnd, IdentifiedConnectionEnd},
-        context::ConnectionReader,
-        error::ConnectionError,
+use crate::{ibc_impl::core::host::type_define::RawConsensusState, Contract};
+use ibc::{
+    core::{
+        ics02_client::context::ClientReader,
+        ics03_connection::{
+            connection::{ConnectionEnd, IdentifiedConnectionEnd},
+            context::ConnectionReader,
+            error::ConnectionError,
+        },
+        ics04_channel::{
+            channel::{ChannelEnd, IdentifiedChannelEnd},
+            commitment::{AcknowledgementCommitment, PacketCommitment},
+            context::ChannelReader,
+            error::ChannelError,
+            packet::{Receipt, Sequence},
+        },
+        ics23_commitment::commitment::CommitmentPrefix,
+        ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
     },
-    ics04_channel::{
-        channel::{ChannelEnd, IdentifiedChannelEnd},
-        context::ChannelReader,
-        error::ChannelError,
-        packet::Sequence,
-    },
-    ics23_commitment::commitment::CommitmentPrefix,
-    ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
+    Height,
 };
 use ibc_proto::{
     google::protobuf::Any,
@@ -47,7 +47,7 @@ pub trait Viewer {
     /// Get the consensus state associated with the given client identifier and height.
     fn get_client_consensus(&self, client_id: ClientId, consensus_height: Height) -> Vec<u8>;
     /// Get the packet receipt associated with the given port, channel, and sequence.
-    fn get_packet_receipt(&self, port_id: PortId, channel_id: ChannelId, seq: Sequence) -> Receipt;
+    fn get_packet_receipt(&self, port_id: PortId, channel_id: ChannelId, seq: Sequence) -> Vec<u8>;
     /// Get the unreceived packet sequences associated with the given port and channel.
     fn get_unreceipt_packet(
         &self,
@@ -61,23 +61,32 @@ pub trait Viewer {
     fn get_client_counter(&self) -> u64;
     /// Get all of the connection ends stored on this host.
     fn get_connections(&self) -> Vec<IdentifiedConnectionEnd>;
+    /// Get all connections associated with the given client id.
+    fn get_client_connections(&self, client_id: ClientId) -> Vec<ConnectionId>;
     /// Get the channel ends associated with the given query request.
     fn get_channels(&self, request: QueryChannelsRequest) -> Vec<IdentifiedChannelEnd>;
-    /// Get the commitment packet state stored on this host.
-    fn get_commitment_packet_state(&self) -> Vec<PacketState>;
+    /// Get the channel ends associated with the given connection id.
+    fn get_connection_channels(&self, connection_id: ConnectionId) -> Vec<IdentifiedChannelEnd>;
     /// Get the packet commitment stored on this host.
-    fn get_packet_commitment(&self) -> Vec<u8>;
+    fn get_packet_commitment(
+        &self,
+        port_id: PortId,
+        channel_id: ChannelId,
+        sequence: Sequence,
+    ) -> Option<PacketCommitment>;
+    /// Get the packet commitment sequences associated with the given port, channel.
+    fn get_packet_commitments(&self, port_id: PortId, channel_id: ChannelId) -> Vec<Sequence>;
     /// Get the next sequence receive associated with the given port and channel.
-    fn get_next_sequence_receive(port_id: &PortId, channel_id: &ChannelId) -> Sequence;
+    fn get_next_sequence_receive(&self, port_id: PortId, channel_id: ChannelId) -> Sequence;
     /// Get the packet acknowledgement associated with the given port, channel, and sequence.
     fn get_packet_acknowledgement(
         &self,
-        port_id: &PortId,
-        channel_id: &ChannelId,
-        sequence: &Sequence,
-    );
-    /// Get the packet commitments associated with the given query request.
-    fn get_packet_commitments(&self, _request: QueryPacketCommitmentsRequest) -> Vec<Sequence>;
+        port_id: PortId,
+        channel_id: ChannelId,
+        sequence: Sequence,
+    ) -> Option<AcknowledgementCommitment>;
+    /// Get the packet acknowledgement sequences associated with the given port, channel.
+    fn get_packet_acknowledgements(&self, port_id: PortId, channel_id: ChannelId) -> Vec<Sequence>;
     /// Get the commitment packet stored on this host.
     fn get_commitment_prefix(&self) -> CommitmentPrefix;
 }
@@ -85,10 +94,7 @@ pub trait Viewer {
 #[near_bindgen]
 impl Viewer for Contract {
     fn get_latest_height(&self) -> Height {
-        Height {
-            revision_number: U64(env::epoch_height()),
-            revision_height: U64(env::block_height()),
-        }
+        Height::new(env::epoch_height(), env::block_height()).unwrap()
     }
 
     fn get_connection_end(&self, connection_id: ConnectionId) -> ConnectionEnd {
@@ -158,8 +164,19 @@ impl Viewer for Contract {
         port_id: PortId,
         channel_id: ChannelId,
         sequence: Sequence,
-    ) -> Receipt {
-        todo!()
+    ) -> Vec<u8> {
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store
+            .packet_receipts
+            .get(&(port_id.clone(), channel_id.clone()))
+            .map_or_else(
+                || vec![],
+                |receipts| {
+                    receipts
+                        .get_value_by_key(&sequence)
+                        .map_or_else(|| vec![], |rcpt| rcpt.try_to_vec().unwrap())
+                },
+            )
     }
 
     fn get_unreceipt_packet(
@@ -220,7 +237,17 @@ impl Viewer for Contract {
             .collect()
     }
 
-    /// ignore pagination now, return all datas
+    fn get_client_connections(&self, client_id: ClientId) -> Vec<ConnectionId> {
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store
+            .client_connections
+            .get(&client_id)
+            .unwrap()
+            .iter()
+            .map(|c| c.clone())
+            .collect_vec()
+    }
+
     fn get_channels(&self, request: QueryChannelsRequest) -> Vec<IdentifiedChannelEnd> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
@@ -236,30 +263,96 @@ impl Viewer for Contract {
             .collect()
     }
 
-    fn get_commitment_packet_state(&self) -> Vec<PacketState> {
-        // let context = self.build_ibc_context();
-        todo!()
+    fn get_connection_channels(&self, connection_id: ConnectionId) -> Vec<IdentifiedChannelEnd> {
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store
+            .connection_channels
+            .get(&connection_id)
+            .unwrap()
+            .iter()
+            .map(|(port_id, channel_id)| IdentifiedChannelEnd {
+                port_id: port_id.clone(),
+                channel_id: channel_id.clone(),
+                channel_end: near_ibc_store
+                    .channels
+                    .get(&(port_id.clone(), channel_id.clone()))
+                    .unwrap()
+                    .clone(),
+            })
+            .collect()
     }
 
-    fn get_packet_commitment(&self) -> Vec<u8> {
-        todo!()
+    fn get_packet_commitment(
+        &self,
+        port_id: PortId,
+        channel_id: ChannelId,
+        sequence: Sequence,
+    ) -> Option<PacketCommitment> {
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store
+            .packet_commitments
+            .get(&(port_id.clone(), channel_id.clone()))
+            .map_or_else(
+                || None,
+                |commitments| commitments.get_value_by_key(&sequence),
+            )
     }
 
-    fn get_next_sequence_receive(port_id: &PortId, channel_id: &ChannelId) -> Sequence {
-        todo!()
+    fn get_packet_commitments(&self, port_id: PortId, channel_id: ChannelId) -> Vec<Sequence> {
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store
+            .packet_commitments
+            .get(&(port_id.clone(), channel_id.clone()))
+            .map_or_else(
+                || vec![],
+                |commitments| {
+                    commitments
+                        .keys()
+                        .iter()
+                        .filter(|sq| sq.is_some())
+                        .map(|sq| sq.unwrap())
+                        .collect()
+                },
+            )
+    }
+
+    fn get_next_sequence_receive(&self, port_id: PortId, channel_id: ChannelId) -> Sequence {
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store
+            .next_sequence_recv
+            .get(&(port_id.clone(), channel_id.clone()))
+            .unwrap()
+            .clone()
     }
 
     fn get_packet_acknowledgement(
         &self,
-        port_id: &PortId,
-        channel_id: &ChannelId,
-        sequence: &Sequence,
-    ) {
-        todo!()
+        port_id: PortId,
+        channel_id: ChannelId,
+        sequence: Sequence,
+    ) -> Option<AcknowledgementCommitment> {
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store
+            .packet_acknowledgements
+            .get(&(port_id.clone(), channel_id.clone()))
+            .map_or_else(|| None, |acks| acks.get_value_by_key(&sequence))
     }
 
-    fn get_packet_commitments(&self, _request: QueryPacketCommitmentsRequest) -> Vec<Sequence> {
-        todo!()
+    fn get_packet_acknowledgements(&self, port_id: PortId, channel_id: ChannelId) -> Vec<Sequence> {
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store
+            .packet_acknowledgements
+            .get(&(port_id.clone(), channel_id.clone()))
+            .map_or_else(
+                || vec![],
+                |acks| {
+                    acks.keys()
+                        .iter()
+                        .filter(|sq| sq.is_some())
+                        .map(|sq| sq.unwrap())
+                        .collect()
+                },
+            )
     }
 
     fn get_commitment_prefix(&self) -> CommitmentPrefix {

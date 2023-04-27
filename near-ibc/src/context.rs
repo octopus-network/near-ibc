@@ -81,10 +81,10 @@ pub struct NearIbcStore {
     pub next_sequence_send: LookupMap<(PortId, ChannelId), Sequence>,
     pub next_sequence_recv: LookupMap<(PortId, ChannelId), Sequence>,
     pub next_sequence_ack: LookupMap<(PortId, ChannelId), Sequence>,
-    pub packet_receipt: LookupMap<(PortId, ChannelId), IndexedLookupQueue<Sequence, Receipt>>,
-    pub packet_acknowledgement:
+    pub packet_receipts: LookupMap<(PortId, ChannelId), IndexedLookupQueue<Sequence, Receipt>>,
+    pub packet_acknowledgements:
         LookupMap<(PortId, ChannelId), IndexedLookupQueue<Sequence, AcknowledgementCommitment>>,
-    pub packet_commitment:
+    pub packet_commitments:
         LookupMap<(PortId, ChannelId), IndexedLookupQueue<Sequence, PacketCommitment>>,
 }
 
