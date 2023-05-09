@@ -3,7 +3,8 @@ use core::str::FromStr;
 use crate::{
     context::NearIbcStore,
     ibc_impl::core::host::{type_define::NearClientStatePath, TENDERMINT_CLIENT_TYPE},
-    KeySortLinkMap, StorageKey,
+    indexed_lookup_queue::IndexedLookupQueue,
+    StorageKey,
 };
 use ibc::{
     clients::ics07_tendermint::{
@@ -62,7 +63,7 @@ impl ClientReader for NearIbcStore {
         //     .as_bytes()
         //     .to_vec();
 
-        if let Some(client_state) = self.client_state.get(&client_id) {
+        if let Some(client_state) = self.client_states.get(&client_id) {
             return match self.client_type(client_id)?.as_str() {
                 TENDERMINT_CLIENT_TYPE => {
                     let result: Ics07ClientState = Protobuf::<Any>::decode_vec(&client_state)
@@ -107,7 +108,7 @@ impl ClientReader for NearIbcStore {
             .consensus_states
             .get(client_id)
             .ok_or(ClientError::ImplementationSpecific)?;
-        if let Some(data) = consensus_states.get(height) {
+        if let Some(data) = consensus_states.get_value_by_key(height) {
             return match self.client_type(client_id)?.as_str() {
                 TENDERMINT_CLIENT_TYPE => {
                     let result: Ics07ConsensusState = Protobuf::<Any>::decode_vec(&data)
@@ -137,7 +138,7 @@ impl ClientReader for NearIbcStore {
             .consensus_states
             .get(client_id)
             .ok_or(ClientError::ImplementationSpecific)?;
-        if let Some(near_consensus_state) = consensus_states.get_next(height) {
+        if let Some(near_consensus_state) = consensus_states.get_next_by_key(height) {
             match self.client_type(client_id)?.as_str() {
                 TENDERMINT_CLIENT_TYPE => {
                     let result: Ics07ConsensusState =
@@ -168,7 +169,7 @@ impl ClientReader for NearIbcStore {
             .consensus_states
             .get(client_id)
             .ok_or(ClientError::ImplementationSpecific)?;
-        if let Some(near_consensus_state) = consensus_states.get_pre(height) {
+        if let Some(near_consensus_state) = consensus_states.get_previous_by_key(height) {
             match self.client_type(client_id)?.as_str() {
                 TENDERMINT_CLIENT_TYPE => {
                     let result: Ics07ConsensusState =
@@ -230,7 +231,7 @@ impl ClientKeeper for NearIbcStore {
     ) -> Result<(), ClientError> {
         // let client_type_path = ClientTypePath(client_id).to_string().as_bytes().to_vec();
 
-        self.client_types.insert(&client_id, &client_type);
+        self.client_types.insert(client_id, client_type);
 
         Ok(())
     }
@@ -245,7 +246,7 @@ impl ClientKeeper for NearIbcStore {
         let data = client_state
             .encode_vec()
             .map_err(|_| ClientError::ImplementationSpecific)?;
-        self.client_state.insert(&client_id, &data);
+        self.client_states.insert(client_id, data);
 
         Ok(())
     }
@@ -261,21 +262,21 @@ impl ClientKeeper for NearIbcStore {
             .encode_vec()
             .map_err(|_| ClientError::ImplementationSpecific)?;
 
-        let mut consensus_states =
-            self.consensus_states
-                .get(&client_id)
-                .unwrap_or(KeySortLinkMap::new(
-                    StorageKey::ConsensusStatesKey {
-                        client_id: client_id.clone(),
-                    },
-                    StorageKey::ConsensusStatesLink {
-                        client_id: client_id.clone(),
-                    },
-                ));
-
-        consensus_states.insert_from_tail(&height, &consensus_state);
-
-        self.consensus_states.insert(&client_id, &consensus_states);
+        if let Some(consensus_states) = self.consensus_states.get_mut(&client_id) {
+            consensus_states.push_back((height, consensus_state));
+        } else {
+            let mut consensus_states = IndexedLookupQueue::new(
+                StorageKey::ConsensusStatesIndex {
+                    client_id: client_id.clone(),
+                },
+                StorageKey::ConsensusStatesKey {
+                    client_id: client_id.clone(),
+                },
+                u64::MAX,
+            );
+            consensus_states.push_back((height, consensus_state));
+            self.consensus_states.insert(client_id, consensus_states);
+        }
 
         Ok(())
     }
@@ -299,8 +300,22 @@ impl ClientKeeper for NearIbcStore {
         height: Height,
         timestamp: Timestamp,
     ) -> Result<(), ClientError> {
-        self.client_processed_times
-            .insert(&(client_id, height), &timestamp.nanoseconds());
+        if let Some(processed_times) = self.client_processed_times.get_mut(&client_id) {
+            processed_times.push_back((height, timestamp.nanoseconds()));
+        } else {
+            let mut processed_times = IndexedLookupQueue::new(
+                StorageKey::ClientProcessedTimesIndex {
+                    client_id: client_id.clone(),
+                },
+                StorageKey::ClientProcessedTimesKey {
+                    client_id: client_id.clone(),
+                },
+                u64::MAX,
+            );
+            processed_times.push_back((height, timestamp.nanoseconds()));
+            self.client_processed_times
+                .insert(client_id, processed_times);
+        }
         Ok(())
     }
 
@@ -313,8 +328,22 @@ impl ClientKeeper for NearIbcStore {
         height: Height,
         host_height: Height,
     ) -> Result<(), ClientError> {
-        self.client_processed_heights
-            .insert(&(client_id, height), &host_height.into());
+        if let Some(processed_heights) = self.client_processed_heights.get_mut(&client_id) {
+            processed_heights.push_back((height, host_height));
+        } else {
+            let mut processed_heights = IndexedLookupQueue::new(
+                StorageKey::ClientProcessedHeightsIndex {
+                    client_id: client_id.clone(),
+                },
+                StorageKey::ClientProcessedHeightsKey {
+                    client_id: client_id.clone(),
+                },
+                u64::MAX,
+            );
+            processed_heights.push_back((height, host_height));
+            self.client_processed_heights
+                .insert(client_id, processed_heights);
+        }
         Ok(())
     }
 }

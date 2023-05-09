@@ -12,7 +12,7 @@ pub mod type_define {
     use std::string::FromUtf8Error;
 
     pub type NearClientStatePath = Vec<u8>;
-    pub type NearClientState = Vec<u8>;
+    pub type RawClientState = Vec<u8>;
     pub type NearClientId = Vec<u8>;
     pub type NearPortId = StoreInNear; //Vec<u8>;
     pub type NearChannelId = StoreInNear; //Vec<u8>;
@@ -21,7 +21,7 @@ pub mod type_define {
     pub type NearTimeStamp = u64;
     pub type IbcHostHeight = Height;
     pub type NearClientConsensusStatePath = Vec<u8>;
-    pub type NearConsensusState = Vec<u8>;
+    pub type RawConsensusState = Vec<u8>;
     pub type NearConnectionsPath = Vec<u8>;
     pub type NearConnectionEnd = Vec<u8>;
     pub type NearChannelEndsPath = Vec<u8>;

@@ -1,4 +1,4 @@
-use crate::{context::NearIbcStore, DEFAULT_COMMITMENT_PREFIX};
+use crate::{context::NearIbcStore, StorageKey, DEFAULT_COMMITMENT_PREFIX};
 
 use ibc::{
     core::{
@@ -19,16 +19,16 @@ use ibc::{
     Height,
 };
 use ibc_proto::{google::protobuf::Any, protobuf::Protobuf};
-use near_sdk::env;
+use near_sdk::{env, store::Vector};
 
 impl ConnectionReader for NearIbcStore {
     /// Returns the ConnectionEnd for the given identifier `conn_id`.
     fn connection_end(&self, conn_id: &ConnectionId) -> Result<ConnectionEnd, ConnectionError> {
-        self.connections
-            .get(&conn_id)
-            .ok_or(ConnectionError::ConnectionMismatch {
+        self.connections.get(&conn_id).map(|c| c.clone()).ok_or(
+            ConnectionError::ConnectionMismatch {
                 connection_id: conn_id.clone(),
-            })
+            },
+        )
     }
 
     /// Returns the ClientState for the given identifier `client_id`.
@@ -101,7 +101,7 @@ impl ConnectionKeeper for NearIbcStore {
         connection_id: ConnectionId,
         connection_end: ConnectionEnd,
     ) -> Result<(), ConnectionError> {
-        self.connections.insert(&connection_id, &connection_end);
+        self.connections.insert(connection_id, connection_end);
         Ok(())
     }
 
@@ -111,7 +111,15 @@ impl ConnectionKeeper for NearIbcStore {
         connection_id: ConnectionId,
         client_id: ClientId,
     ) -> Result<(), ConnectionError> {
-        self.client_connections.insert(&client_id, &connection_id);
+        if let Some(connections) = self.client_connections.get_mut(&client_id) {
+            connections.push(connection_id);
+        } else {
+            let mut connections = Vector::new(StorageKey::ClientConnectionsVector {
+                client_id: client_id.clone(),
+            });
+            connections.push(connection_id);
+            self.client_connections.insert(client_id, connections);
+        }
         Ok(())
     }
 

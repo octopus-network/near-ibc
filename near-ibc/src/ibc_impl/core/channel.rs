@@ -3,6 +3,8 @@ use core::{str::FromStr, time::Duration};
 use crate::{
     context::NearIbcStore,
     ibc_impl::core::host::type_define::{NearConnectionId, StoreInNear},
+    indexed_lookup_queue::IndexedLookupQueue,
+    StorageKey,
 };
 use ibc::{
     core::{
@@ -32,7 +34,7 @@ use ibc::{
     Height,
 };
 use ibc_proto::protobuf::Protobuf;
-use near_sdk::env::sha256;
+use near_sdk::{env::sha256, store::Vector};
 use sha2::Digest;
 
 impl ChannelReader for NearIbcStore {
@@ -44,6 +46,7 @@ impl ChannelReader for NearIbcStore {
     ) -> Result<ChannelEnd, ChannelError> {
         self.channels
             .get(&(port_id.clone(), channel_id.clone()))
+            .map(|ce| ce.clone())
             .ok_or(ChannelError::ChannelNotFound {
                 port_id: port_id.clone(),
                 channel_id: channel_id.clone(),
@@ -70,19 +73,8 @@ impl ChannelReader for NearIbcStore {
             })?;
 
         let mut result: Vec<(PortId, ChannelId)> = vec![];
-        for (near_port_id, near_channel_id) in connection_channels {
-            result.push((
-                near_port_id.try_into().map_err(|e| ChannelError::Other {
-                    description: format!("Decode ChannelEnds Path format Failed: {:?}", e)
-                        .to_string(),
-                })?,
-                near_channel_id
-                    .try_into()
-                    .map_err(|e| ChannelError::Other {
-                        description: format!("Decode ChannelEnds Path format Failed: {:?}", e)
-                            .to_string(),
-                    })?,
-            ))
+        for element in connection_channels {
+            result.push(element.clone())
         }
 
         Ok(result)
@@ -111,6 +103,7 @@ impl ChannelReader for NearIbcStore {
     ) -> Result<Sequence, PacketError> {
         self.next_sequence_send
             .get(&(port_id.clone(), channel_id.clone()))
+            .map(|sq| sq.clone())
             .ok_or(PacketError::MissingNextSendSeq {
                 port_id: port_id.clone(),
                 channel_id: channel_id.clone(),
@@ -124,6 +117,7 @@ impl ChannelReader for NearIbcStore {
     ) -> Result<Sequence, PacketError> {
         self.next_sequence_recv
             .get(&(port_id.clone(), channel_id.clone()))
+            .map(|sq| sq.clone())
             .ok_or(PacketError::MissingNextRecvSeq {
                 port_id: port_id.clone(),
                 channel_id: channel_id.clone(),
@@ -138,6 +132,7 @@ impl ChannelReader for NearIbcStore {
     ) -> Result<Sequence, PacketError> {
         self.next_sequence_ack
             .get(&(port_id.clone(), channel_id.clone()))
+            .map(|sq| sq.clone())
             .ok_or(PacketError::MissingNextSendSeq {
                 port_id: port_id.clone(),
                 channel_id: channel_id.clone(),
@@ -150,11 +145,15 @@ impl ChannelReader for NearIbcStore {
         channel_id: &ChannelId,
         sequence: &Sequence,
     ) -> Result<PacketCommitment, PacketError> {
-        self.packet_commitment
-            .get(&(port_id.clone(), channel_id.clone(), sequence.clone()))
-            .ok_or(PacketError::MissingNextSendSeq {
-                port_id: port_id.clone(),
-                channel_id: channel_id.clone(),
+        self.packet_commitments
+            .get(&(port_id.clone(), channel_id.clone()))
+            .ok_or(PacketError::PacketCommitmentNotFound {
+                sequence: sequence.clone(),
+            })
+            .unwrap()
+            .get_value_by_key(sequence)
+            .ok_or(PacketError::PacketCommitmentNotFound {
+                sequence: sequence.clone(),
             })
     }
 
@@ -164,8 +163,13 @@ impl ChannelReader for NearIbcStore {
         channel_id: &ChannelId,
         sequence: &Sequence,
     ) -> Result<Receipt, PacketError> {
-        self.packet_receipt
-            .get(&(port_id.clone(), channel_id.clone(), sequence.clone()))
+        self.packet_receipts
+            .get(&(port_id.clone(), channel_id.clone()))
+            .ok_or(PacketError::PacketReceiptNotFound {
+                sequence: sequence.clone(),
+            })
+            .unwrap()
+            .get_value_by_key(sequence)
             .ok_or(PacketError::PacketReceiptNotFound {
                 sequence: sequence.clone(),
             })
@@ -177,12 +181,16 @@ impl ChannelReader for NearIbcStore {
         channel_id: &ChannelId,
         sequence: &Sequence,
     ) -> Result<AcknowledgementCommitment, PacketError> {
-        self.packet_acknowledgement
-            .get(&(port_id.clone(), channel_id.clone(), sequence.clone()))
+        self.packet_acknowledgements
+            .get(&(port_id.clone(), channel_id.clone()))
             .ok_or(PacketError::PacketAcknowledgementNotFound {
                 sequence: sequence.clone(),
             })
-            .map(Into::into)
+            .unwrap()
+            .get_value_by_key(sequence)
+            .ok_or(PacketError::PacketAcknowledgementNotFound {
+                sequence: sequence.clone(),
+            })
     }
 
     /// A hashing function for packet commitments
@@ -216,7 +224,13 @@ impl ChannelReader for NearIbcStore {
         height: &Height,
     ) -> Result<Timestamp, ChannelError> {
         self.client_processed_times
-            .get(&(client_id.clone(), height.clone()))
+            .get(client_id)
+            .ok_or(ChannelError::ProcessedTimeNotFound {
+                client_id: client_id.clone(),
+                height: height.clone(),
+            })
+            .unwrap()
+            .get_value_by_key(height)
             .ok_or(ChannelError::ProcessedTimeNotFound {
                 client_id: client_id.clone(),
                 height: height.clone(),
@@ -235,11 +249,18 @@ impl ChannelReader for NearIbcStore {
         height: &Height,
     ) -> Result<Height, ChannelError> {
         self.client_processed_heights
-            .get(&(client_id.clone(), height.clone()))
+            .get(client_id)
             .ok_or(ChannelError::ProcessedHeightNotFound {
                 client_id: client_id.clone(),
                 height: height.clone(),
             })
+            .unwrap()
+            .get_value_by_key(height)
+            .ok_or(ChannelError::ProcessedHeightNotFound {
+                client_id: client_id.clone(),
+                height: height.clone(),
+            })
+            .map(|h| h.clone())
     }
 
     /// Returns a counter on the number of channel ids have been created thus far.
@@ -264,11 +285,27 @@ impl ChannelKeeper for NearIbcStore {
         sequence: Sequence,
         commitment: PacketCommitment,
     ) -> Result<(), PacketError> {
-        self.packet_commitment.insert(
-            &(port_id.clone(), channel_id.clone(), sequence),
-            &commitment,
-        );
-
+        if let Some(commitments) = self
+            .packet_commitments
+            .get_mut(&(port_id.clone(), channel_id.clone()))
+        {
+            commitments.push_back((sequence, commitment));
+        } else {
+            let mut commitments = IndexedLookupQueue::new(
+                StorageKey::PacketCommitmentIndex {
+                    port_id: port_id.clone(),
+                    channel_id: channel_id.clone(),
+                },
+                StorageKey::PacketCommitmentKey {
+                    port_id: port_id.clone(),
+                    channel_id: channel_id.clone(),
+                },
+                u64::MAX,
+            );
+            commitments.push_back((sequence, commitment));
+            self.packet_commitments
+                .insert((port_id.clone(), channel_id.clone()), commitments);
+        }
         Ok(())
     }
 
@@ -278,8 +315,16 @@ impl ChannelKeeper for NearIbcStore {
         channel_id: &ChannelId,
         seq: &Sequence,
     ) -> Result<(), PacketError> {
-        self.packet_commitment
-            .remove(&(port_id.clone(), channel_id.clone(), seq.clone()));
+        if let Some(commitments) = self
+            .packet_commitments
+            .get_mut(&(port_id.clone(), channel_id.clone()))
+        {
+            commitments.remove_by_key(seq);
+        } else {
+            return Err(PacketError::PacketCommitmentNotFound {
+                sequence: seq.clone(),
+            });
+        }
         Ok(())
     }
 
@@ -290,18 +335,27 @@ impl ChannelKeeper for NearIbcStore {
         sequence: Sequence,
         receipt: Receipt,
     ) -> Result<(), PacketError> {
-        let packet_receipt_path = ReceiptsPath {
-            port_id: port_id.clone(),
-            channel_id: channel_id.clone(),
-            sequence,
+        if let Some(receipts) = self
+            .packet_receipts
+            .get_mut(&(port_id.clone(), channel_id.clone()))
+        {
+            receipts.push_back((sequence, receipt));
+        } else {
+            let mut receipts = IndexedLookupQueue::new(
+                StorageKey::PacketReceiptIndex {
+                    port_id: port_id.clone(),
+                    channel_id: channel_id.clone(),
+                },
+                StorageKey::PacketReceiptKey {
+                    port_id: port_id.clone(),
+                    channel_id: channel_id.clone(),
+                },
+                u64::MAX,
+            );
+            receipts.push_back((sequence, receipt));
+            self.packet_receipts
+                .insert((port_id.clone(), channel_id.clone()), receipts);
         }
-        .to_string()
-        .as_bytes()
-        .to_vec();
-
-        self.packet_receipt
-            .insert(&(port_id.clone(), channel_id.clone(), sequence), &receipt);
-
         Ok(())
     }
 
@@ -312,11 +366,27 @@ impl ChannelKeeper for NearIbcStore {
         sequence: Sequence,
         ack_commitment: AcknowledgementCommitment,
     ) -> Result<(), PacketError> {
-        self.packet_acknowledgement.insert(
-            &(port_id.clone(), channel_id.clone(), sequence.clone()),
-            &ack_commitment,
-        );
-
+        if let Some(acknowledgments) = self
+            .packet_acknowledgements
+            .get_mut(&(port_id.clone(), channel_id.clone()))
+        {
+            acknowledgments.push_back((sequence, ack_commitment));
+        } else {
+            let mut acknowledgments = IndexedLookupQueue::new(
+                StorageKey::PacketAcknowledgementIndex {
+                    port_id: port_id.clone(),
+                    channel_id: channel_id.clone(),
+                },
+                StorageKey::PacketAcknowledgementKey {
+                    port_id: port_id.clone(),
+                    channel_id: channel_id.clone(),
+                },
+                u64::MAX,
+            );
+            acknowledgments.push_back((sequence, ack_commitment));
+            self.packet_acknowledgements
+                .insert((port_id.clone(), channel_id.clone()), acknowledgments);
+        }
         Ok(())
     }
 
@@ -326,11 +396,16 @@ impl ChannelKeeper for NearIbcStore {
         channel_id: &ChannelId,
         sequence: &Sequence,
     ) -> Result<(), PacketError> {
-        self.packet_acknowledgement.remove(&(
-            port_id.clone(),
-            channel_id.clone(),
-            sequence.clone(),
-        ));
+        if let Some(acknowledgements) = self
+            .packet_acknowledgements
+            .get_mut(&(port_id.clone(), channel_id.clone()))
+        {
+            acknowledgements.remove_by_key(sequence);
+        } else {
+            return Err(PacketError::PacketAcknowledgementNotFound {
+                sequence: sequence.clone(),
+            });
+        }
         Ok(())
     }
 
@@ -340,11 +415,15 @@ impl ChannelKeeper for NearIbcStore {
         port_id: PortId,
         channel_id: ChannelId,
     ) -> Result<(), ChannelError> {
-        let mut vec = self.connection_channels.get(&conn_id).unwrap_or_default();
-        vec.push((port_id, channel_id));
-
-        self.connection_channels.insert(&conn_id, &vec);
-
+        if let Some(channels) = self.connection_channels.get_mut(&conn_id) {
+            channels.push((port_id, channel_id));
+        } else {
+            let mut channels = Vector::new(StorageKey::ConnectionChannelsVector {
+                connection_id: conn_id.clone(),
+            });
+            channels.push((port_id, channel_id));
+            self.connection_channels.insert(conn_id, channels);
+        }
         Ok(())
     }
 
@@ -356,7 +435,7 @@ impl ChannelKeeper for NearIbcStore {
         channel_end: ChannelEnd,
     ) -> Result<(), ChannelError> {
         self.channels
-            .insert(&(port_id.clone(), channel_id.clone()), &channel_end);
+            .insert((port_id.clone(), channel_id.clone()), channel_end);
 
         Ok(())
     }
@@ -368,7 +447,7 @@ impl ChannelKeeper for NearIbcStore {
         seq: Sequence,
     ) -> Result<(), PacketError> {
         self.next_sequence_send
-            .insert(&(port_id.clone(), channel_id.clone()), &(seq.into()));
+            .insert((port_id.clone(), channel_id.clone()), seq.into());
         Ok(())
     }
 
@@ -379,7 +458,7 @@ impl ChannelKeeper for NearIbcStore {
         seq: Sequence,
     ) -> Result<(), PacketError> {
         self.next_sequence_recv
-            .insert(&(port_id.clone(), channel_id.clone()), &(seq.into()));
+            .insert((port_id.clone(), channel_id.clone()), seq.into());
 
         Ok(())
     }
@@ -391,7 +470,7 @@ impl ChannelKeeper for NearIbcStore {
         seq: Sequence,
     ) -> Result<(), PacketError> {
         self.next_sequence_ack
-            .insert(&(port_id.clone(), channel_id.clone()), &(seq.into()));
+            .insert((port_id.clone(), channel_id.clone()), seq.into());
 
         Ok(())
     }
