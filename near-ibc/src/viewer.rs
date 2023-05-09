@@ -37,13 +37,15 @@ pub trait Viewer {
     /// Get the latest height of the host chain.
     fn get_latest_height(&self) -> Height;
     /// Get the connection end associated with the given connection identifier.
-    fn get_connection_end(&self, connection_id: ConnectionId) -> ConnectionEnd;
+    fn get_connection_end(&self, connection_id: ConnectionId) -> Option<ConnectionEnd>;
     /// Get all of the connection ends stored on this host.
     fn get_connection_ends(&self) -> Vec<(ConnectionId, ConnectionEnd)>;
     /// Get the channel end associated with the given port and channel identifiers.
-    fn get_channel_end(&self, port_id: PortId, channel_id: ChannelId) -> ChannelEnd;
+    fn get_channel_end(&self, port_id: PortId, channel_id: ChannelId) -> Option<ChannelEnd>;
     /// Get the raw client state associated with the given client identifier.
     fn get_client_state(&self, client_id: ClientId) -> Vec<u8>;
+    /// Get the heights of all stored consensus states associated with the given client identifier.
+    fn get_client_consensus_heights(&self, client_id: ClientId) -> Vec<Height>;
     /// Get the consensus state associated with the given client identifier and height.
     fn get_client_consensus(&self, client_id: ClientId, consensus_height: Height) -> Vec<u8>;
     /// Get the packet receipt associated with the given port, channel, and sequence.
@@ -77,7 +79,8 @@ pub trait Viewer {
     /// Get the packet commitment sequences associated with the given port, channel.
     fn get_packet_commitments(&self, port_id: PortId, channel_id: ChannelId) -> Vec<Sequence>;
     /// Get the next sequence receive associated with the given port and channel.
-    fn get_next_sequence_receive(&self, port_id: PortId, channel_id: ChannelId) -> Sequence;
+    fn get_next_sequence_receive(&self, port_id: PortId, channel_id: ChannelId)
+        -> Option<Sequence>;
     /// Get the packet acknowledgement associated with the given port, channel, and sequence.
     fn get_packet_acknowledgement(
         &self,
@@ -97,16 +100,12 @@ impl Viewer for Contract {
         Height::new(env::epoch_height(), env::block_height()).unwrap()
     }
 
-    fn get_connection_end(&self, connection_id: ConnectionId) -> ConnectionEnd {
+    fn get_connection_end(&self, connection_id: ConnectionId) -> Option<ConnectionEnd> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
             .connections
             .get(&connection_id)
-            .ok_or(ConnectionError::ConnectionMismatch {
-                connection_id: connection_id.clone(),
-            })
-            .unwrap()
-            .clone()
+            .map_or_else(|| None, |connection_end| Some(connection_end.clone()))
     }
 
     fn get_connection_ends(&self) -> Vec<(ConnectionId, ConnectionEnd)> {
@@ -128,17 +127,12 @@ impl Viewer for Contract {
             .collect()
     }
 
-    fn get_channel_end(&self, port_id: PortId, channel_id: ChannelId) -> ChannelEnd {
+    fn get_channel_end(&self, port_id: PortId, channel_id: ChannelId) -> Option<ChannelEnd> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
             .channels
             .get(&(port_id.clone(), channel_id.clone()))
-            .ok_or(ChannelError::ChannelNotFound {
-                port_id: port_id.clone(),
-                channel_id: channel_id.clone(),
-            })
-            .unwrap()
-            .clone()
+            .map_or_else(|| None, |ce| Some(ce.clone()))
     }
 
     fn get_client_state(&self, client_id: ClientId) -> Vec<u8> {
@@ -148,15 +142,31 @@ impl Viewer for Contract {
         option.unwrap().clone()
     }
 
+    fn get_client_consensus_heights(&self, client_id: ClientId) -> Vec<Height> {
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store.consensus_states.get(&client_id).map_or_else(
+            || Vec::new(),
+            |consensus_states| {
+                consensus_states
+                    .keys()
+                    .iter()
+                    .filter(|height| height.is_some())
+                    .map(|height| height.unwrap())
+                    .collect()
+            },
+        )
+    }
+
     fn get_client_consensus(&self, client_id: ClientId, consensus_height: Height) -> Vec<u8> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
-        let option = near_ibc_store
-            .consensus_states
-            .get(&client_id)
-            .unwrap()
-            .get_value_by_key(&consensus_height.into());
-        log!("get_client_state with {:?},result: {:?}", client_id, option);
-        option.unwrap()
+        near_ibc_store.consensus_states.get(&client_id).map_or_else(
+            || Vec::new(),
+            |consensus_states| {
+                consensus_states
+                    .get_value_by_key(&consensus_height.into())
+                    .unwrap()
+            },
+        )
     }
 
     fn get_packet_receipt(
@@ -242,10 +252,10 @@ impl Viewer for Contract {
         near_ibc_store
             .client_connections
             .get(&client_id)
-            .unwrap()
-            .iter()
-            .map(|c| c.clone())
-            .collect_vec()
+            .map_or_else(
+                || vec![],
+                |connections| connections.iter().map(|c| c.clone()).collect_vec(),
+            )
     }
 
     fn get_channels(&self, request: QueryChannelsRequest) -> Vec<IdentifiedChannelEnd> {
@@ -268,18 +278,23 @@ impl Viewer for Contract {
         near_ibc_store
             .connection_channels
             .get(&connection_id)
-            .unwrap()
-            .iter()
-            .map(|(port_id, channel_id)| IdentifiedChannelEnd {
-                port_id: port_id.clone(),
-                channel_id: channel_id.clone(),
-                channel_end: near_ibc_store
-                    .channels
-                    .get(&(port_id.clone(), channel_id.clone()))
-                    .unwrap()
-                    .clone(),
-            })
-            .collect()
+            .map_or_else(
+                || vec![],
+                |channels| {
+                    channels
+                        .iter()
+                        .map(|(port_id, channel_id)| IdentifiedChannelEnd {
+                            port_id: port_id.clone(),
+                            channel_id: channel_id.clone(),
+                            channel_end: near_ibc_store
+                                .channels
+                                .get(&(port_id.clone(), channel_id.clone()))
+                                .unwrap()
+                                .clone(),
+                        })
+                        .collect()
+                },
+            )
     }
 
     fn get_packet_commitment(
@@ -316,13 +331,16 @@ impl Viewer for Contract {
             )
     }
 
-    fn get_next_sequence_receive(&self, port_id: PortId, channel_id: ChannelId) -> Sequence {
+    fn get_next_sequence_receive(
+        &self,
+        port_id: PortId,
+        channel_id: ChannelId,
+    ) -> Option<Sequence> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
             .next_sequence_recv
             .get(&(port_id.clone(), channel_id.clone()))
-            .unwrap()
-            .clone()
+            .map_or_else(|| None, |sq| Some(sq.clone()))
     }
 
     fn get_packet_acknowledgement(
