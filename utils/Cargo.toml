@@ -1,0 +1,10 @@
+[package]
+name = "utils"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+near-sdk = "4.1.0"

@@ -9,3 +9,4 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 near-sdk = "4.1.0"
 near-contract-standards = "4.1.0"
+utils = { path = "../utils" }

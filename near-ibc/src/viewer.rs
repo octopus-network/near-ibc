@@ -1,37 +1,19 @@
+use crate::Contract;
 use crate::*;
-use crate::{ibc_impl::core::host::type_define::RawConsensusState, Contract};
 use ibc::{
     core::{
-        ics02_client::context::ClientReader,
-        ics03_connection::{
-            connection::{ConnectionEnd, IdentifiedConnectionEnd},
-            context::ConnectionReader,
-            error::ConnectionError,
-        },
+        ics03_connection::connection::{ConnectionEnd, IdentifiedConnectionEnd},
         ics04_channel::{
             channel::{ChannelEnd, IdentifiedChannelEnd},
             commitment::{AcknowledgementCommitment, PacketCommitment},
-            context::ChannelReader,
-            error::ChannelError,
-            packet::{Receipt, Sequence},
+            packet::Sequence,
         },
         ics23_commitment::commitment::CommitmentPrefix,
         ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
     },
     Height,
 };
-use ibc_proto::{
-    google::protobuf::Any,
-    ibc::core::{
-        channel::v1::{
-            PacketState, QueryChannelsRequest, QueryPacketCommitmentRequest,
-            QueryPacketCommitmentsRequest,
-        },
-        client::v1::IdentifiedClientState,
-    },
-    protobuf::Protobuf,
-};
-use near_sdk::json_types::U64;
+use ibc_proto::ibc::core::channel::v1::QueryChannelsRequest;
 
 pub trait Viewer {
     /// Get the latest height of the host chain.
@@ -195,24 +177,16 @@ impl Viewer for Contract {
         channel_id: ChannelId,
         sequences: Vec<Sequence>,
     ) -> Vec<Sequence> {
-        // let context = self.build_ibc_context();
-
-        // let near_port_id =
-
-        // sequences
-        //     .iter()
-        //     .filter(|&e| context.near_ibc_store.packet_receipt.contains_key((p)))
-        //     .collect()
-        todo!()
-
-        // sequences.iter().filter(|e|  )
-
-        // context.near_ibc_store
-        //     .packet_receipt
-        //     .get(&(port_id.as_bytes().into(), channel_id.as_bytes().into()))
-        //     .filter(|e|)
-        // context.get_packet_receipt(&port_id, &channel_id)
-        // context.get_unre(&port_id, &channel_id, seq).unwrap()
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        let stored_sequences = near_ibc_store
+            .packet_receipts
+            .get(&(port_id, channel_id))
+            .map_or_else(|| vec![], |receipts| receipts.keys());
+        sequences
+            .iter()
+            .filter(|sequence| !stored_sequences.contains(&Some(**sequence)))
+            .cloned()
+            .collect()
     }
 
     fn get_clients(&self) -> Vec<(ClientId, Vec<u8>)> {

@@ -1,5 +1,4 @@
 use crate::{context::NearIbcStore, StorageKey, DEFAULT_COMMITMENT_PREFIX};
-
 use ibc::{
     core::{
         ics02_client::{
@@ -11,14 +10,11 @@ use ibc::{
             error::ConnectionError,
         },
         ics23_commitment::commitment::CommitmentPrefix,
-        ics24_host::{
-            identifier::{ClientId, ConnectionId},
-            path::{ClientConnectionsPath, ConnectionsPath},
-        },
+        ics24_host::identifier::{ClientId, ConnectionId},
     },
     Height,
 };
-use ibc_proto::{google::protobuf::Any, protobuf::Protobuf};
+use ibc_proto::google::protobuf::Any;
 use near_sdk::{env, store::Vector};
 
 impl ConnectionReader for NearIbcStore {

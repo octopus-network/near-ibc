@@ -1,12 +1,9 @@
-use core::{cell::RefCell, fmt::Debug};
-use std::marker::PhantomData;
-
+use crate::context::NearIbcStoreHost;
+use core::fmt::Debug;
 use ibc::{
-    applications::transfer::context::{TokenTransferContext, TokenTransferReader},
     core::{
         ics04_channel::{
             channel::{Counterparty, Order},
-            context::{ChannelKeeper, ChannelReader},
             error::{ChannelError, PacketError},
             handler::ModuleExtras,
             msgs::acknowledgement::Acknowledgement,
@@ -18,9 +15,8 @@ use ibc::{
     },
     signer::Signer,
 };
-use ibc_proto::ibc::apps::transfer;
-
-use crate::context::{NearIbcStore, NearIbcStoreHost};
+use near_sdk::AccountId;
+use std::str::FromStr;
 
 pub mod impls;
 
@@ -173,6 +169,8 @@ impl TryFrom<Signer> for AccountIdConversion {
     type Error = &'static str;
 
     fn try_from(value: Signer) -> Result<Self, Self::Error> {
-        todo!()
+        Ok(AccountIdConversion(
+            AccountId::from_str(value.as_ref()).map_err(|_| "invalid signer")?,
+        ))
     }
 }

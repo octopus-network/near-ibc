@@ -8,7 +8,10 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 near-sdk = "4.1.0"
+near-contract-standards = "4.1.0"
 ibc = { version = "0.28.0", default-features = false, features = ["parity-scale-codec", "mocks-no-std", "serde", "borsh"]}
 ibc-proto = { version = "0.25.0", default-features = false }
 sha2 = { version = "0.10.6", default-features = false }
 itertools = "0.10.5"
+token-factory = { path = "../token-factory" }
+utils = { path = "../utils" }

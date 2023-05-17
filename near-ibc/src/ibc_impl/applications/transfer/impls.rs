@@ -1,10 +1,10 @@
-use core::fmt::Debug;
-
+use super::{AccountIdConversion, TransferModule};
+use crate::context::NearIbcStoreHost;
 use ibc::{
     applications::transfer::{
         context::{BankKeeper, TokenTransferContext, TokenTransferKeeper, TokenTransferReader},
         error::TokenTransferError,
-        PrefixedCoin, PORT_ID_STR,
+        PrefixedCoin,
     },
     core::{
         ics02_client::{client_state::ClientState, consensus_state::ConsensusState},
@@ -18,13 +18,16 @@ use ibc::{
         },
         ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
     },
-    signer::Signer,
     Height,
 };
-
-use crate::context::NearIbcStoreHost;
-
-use super::{AccountIdConversion, TransferModule};
+use near_sdk::{
+    env,
+    json_types::U128,
+    log,
+    serde::{Deserialize, Serialize},
+    Promise,
+};
+use std::str::FromStr;
 
 impl BankKeeper for TransferModule {
     type AccountId = AccountIdConversion;
@@ -43,7 +46,34 @@ impl BankKeeper for TransferModule {
         account: &Self::AccountId,
         amt: &PrefixedCoin,
     ) -> Result<(), TokenTransferError> {
-        todo!()
+        log!(
+            "Minting coins for account {}, trace path {}, base denom {}",
+            account.0,
+            amt.denom.trace_path,
+            amt.denom.base_denom
+        );
+        #[derive(Serialize, Deserialize, Clone)]
+        #[serde(crate = "near_sdk::serde")]
+        struct Input {
+            pub trace_path: String,
+            pub base_denom: String,
+            pub token_owner: String,
+            pub amount: U128,
+        }
+        let args = Input {
+            trace_path: amt.denom.trace_path.to_string(),
+            base_denom: amt.denom.base_denom.to_string(),
+            token_owner: account.0.to_string(),
+            amount: U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
+        };
+        let args = near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_ASSET");
+        Promise::new(utils::get_token_factory_contract_id()).function_call(
+            "mint_asset".to_string(),
+            args,
+            env::attached_deposit(),
+            utils::GAS_FOR_MINT_ASSET,
+        );
+        Ok(())
     }
 
     fn burn_coins(
@@ -67,15 +97,25 @@ impl TokenTransferReader for TransferModule {
         port_id: &PortId,
         channel_id: &ChannelId,
     ) -> Result<<Self as TokenTransferReader>::AccountId, TokenTransferError> {
-        todo!()
+        let escrow_account = format!(
+            "{}.ef.{}.{}",
+            channel_id.as_str(),
+            port_id.as_str(),
+            env::current_account_id()
+        );
+        Ok(AccountIdConversion(
+            near_sdk::AccountId::from_str(escrow_account.as_str()).unwrap(),
+        ))
     }
 
     fn is_send_enabled(&self) -> bool {
-        todo!()
+        // TODO: check if this is correct
+        true
     }
 
     fn is_receive_enabled(&self) -> bool {
-        todo!()
+        // TODO: check if this is correct
+        true
     }
 }
 

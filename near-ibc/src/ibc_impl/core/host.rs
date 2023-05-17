@@ -2,14 +2,7 @@ pub const TENDERMINT_CLIENT_TYPE: &'static str = "07-tendermint";
 
 pub mod type_define {
     use crate::*;
-    use ibc::core::ics04_channel::channel::ChannelEnd;
-    use ibc::core::ics04_channel::commitment::AcknowledgementCommitment;
-    use ibc::core::ics04_channel::packet::{Receipt, Sequence};
-    use ibc::core::ics24_host::identifier::{ChannelId, PortId};
     use ibc::Height;
-    use ibc_proto::protobuf::Protobuf;
-    use std::str::FromStr;
-    use std::string::FromUtf8Error;
 
     pub type NearClientStatePath = Vec<u8>;
     pub type RawClientState = Vec<u8>;

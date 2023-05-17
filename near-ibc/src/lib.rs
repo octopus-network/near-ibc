@@ -1,26 +1,14 @@
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-#![allow(dead_code)]
-
-use core::str::FromStr;
-
 use crate::{
     context::{NearIbcStore, NearRouterContext},
     events::EventEmit,
-    indexed_lookup_queue::IndexedLookupQueue,
 };
-use ibc::{
-    applications::transfer,
-    core::{
-        ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
-        ics26_routing::context::RouterBuilder,
-        ics26_routing::handler::MsgReceipt,
-    },
-    events::IbcEvent,
+use ibc::core::{
+    ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
+    ics26_routing::handler::MsgReceipt,
 };
-use ibc_impl::{applications::transfer::TransferModule, core::routing::NearRouterBuilder};
-use ibc_proto::google::protobuf::{Any, Duration};
+use ibc_proto::google::protobuf::Any;
 use itertools::Itertools;
+use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::{
     assert_self,
     borsh::{self, BorshDeserialize, BorshSerialize},
@@ -31,26 +19,27 @@ use near_sdk::{
     serde::{Deserialize, Serialize},
     serde_json,
     store::{LookupMap, UnorderedMap},
-    AccountId, BorshStorageKey, Gas, PanicOnDefault, Promise,
+    AccountId, BorshStorageKey, PanicOnDefault, Promise,
 };
+use utils::{types::AssetDenom, BALANCE_FOR_TOKEN_CONTRACT_INIT, GAS_FOR_SETUP_ASSET};
 
 pub mod context;
 pub mod events;
 pub mod ibc_impl;
 pub mod indexed_lookup_queue;
+pub mod migration;
 pub mod viewer;
 
 pub const DEFAULT_COMMITMENT_PREFIX: &str = "ibc";
 /// As the `deliver` function may cause storage changes, the caller needs to attach some NEAR
-/// to cover the storage cost. The minimum valid amount is 0.01 NEAR (for 1 kb storage).
-const MINIMUM_ATTACHED_NEAR_FOR_DELEVER_MSG: u128 = 10_000_000_000_000_000_000_000;
-/// Gas for calling `check_refund` function.
-const GAS_FOR_CHECK_REFUND: Gas = Gas(15_000_000_000_000);
+/// to cover the storage cost. The minimum valid amount is 0.1 NEAR (for 10 kb storage).
+const MINIMUM_ATTACHED_NEAR_FOR_DELEVER_MSG: u128 = 100_000_000_000_000_000_000_000;
 
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct Contract {
     near_ibc_store: LazyOption<NearIbcStore>,
+    governance_account: AccountId,
 }
 
 #[near_bindgen]
@@ -83,6 +72,7 @@ impl Contract {
                     packet_commitments: LookupMap::new(StorageKey::PacketCommitment),
                 }),
             ),
+            governance_account: env::current_account_id(),
         }
     }
     ///
@@ -92,7 +82,7 @@ impl Contract {
             env::attached_deposit() >= MINIMUM_ATTACHED_NEAR_FOR_DELEVER_MSG,
             "Need to attach at least 0.1 NEAR to cover the possible storage cost."
         );
-        let used_bytes = env::storage_usage();
+        let previously_used_bytes = env::storage_usage();
         // Deliver messages to `ibc-rs`
         let near_ibc_store = self.near_ibc_store.get().unwrap();
 
@@ -121,47 +111,66 @@ impl Contract {
         for event in events {
             event.emit();
         }
-        // Check and fefund the unused attached deposit by a promise function call.
+        // Refund unused deposit.
+        utils::refund_deposit(previously_used_bytes, env::attached_deposit());
+    }
+    // Assert that the caller is the preset governance account.
+    fn assert_governance(&self) {
+        assert_eq!(
+            env::predecessor_account_id(),
+            self.governance_account,
+            "ERR_NOT_GOVERNANCE_ACCOUNT"
+        );
+    }
+    /// Setup the token contract for the given asset denom with the given metadata.
+    /// Only the governance account can call this function.
+    #[payable]
+    pub fn setup_token_contract(
+        &mut self,
+        trace_path: String,
+        base_denom: String,
+        metadata: FungibleTokenMetadata,
+    ) {
+        self.assert_governance();
+        assert!(
+            env::prepaid_gas() > GAS_FOR_SETUP_ASSET + GAS_FOR_SETUP_ASSET / 10,
+            "ERR_NOT_ENOUGH_GAS"
+        );
+        let asset_denom = AssetDenom {
+            trace_path,
+            base_denom,
+        };
+        let minimum_deposit = BALANCE_FOR_TOKEN_CONTRACT_INIT
+            + env::storage_byte_cost() * (asset_denom.try_to_vec().unwrap().len() + 32) as u128 * 2;
+        assert!(
+            env::attached_deposit() >= minimum_deposit,
+            "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
+            minimum_deposit
+        );
+        let token_factory_contract_id = utils::get_token_factory_contract_id();
         #[derive(Serialize, Deserialize, Clone)]
         #[serde(crate = "near_sdk::serde")]
         struct Input {
-            pub caller: AccountId,
-            pub attached_deposit: U128,
-            pub used_bytes: U64,
+            pub trace_path: String,
+            pub base_denom: String,
+            pub metadata: FungibleTokenMetadata,
         }
         let args = Input {
-            caller: env::predecessor_account_id(),
-            attached_deposit: U128(env::attached_deposit()),
-            used_bytes: U64(used_bytes),
+            trace_path: asset_denom.trace_path,
+            base_denom: asset_denom.base_denom,
+            metadata,
         };
-        let args =
-            near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_FUNCTION");
-        Promise::new(env::current_account_id()).function_call(
-            "check_refund".to_string(),
+        let args = near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_SETUP_ASSET");
+        Promise::new(token_factory_contract_id).function_call(
+            "setup_asset".to_string(),
             args,
-            0,
-            GAS_FOR_CHECK_REFUND,
+            env::attached_deposit(),
+            GAS_FOR_SETUP_ASSET,
         );
     }
-    /// Check the storage usage and refund the unused attached deposit.
-    pub fn check_refund(&mut self, caller: AccountId, attached_deposit: U128, used_bytes: U64) {
-        assert_self();
-        let mut refund_amount = attached_deposit.0;
-        if env::storage_usage() > used_bytes.0 {
-            log!(
-                "near ibc deliver storage usage: {}",
-                env::storage_usage() - used_bytes.0
-            );
-            let cost = env::storage_byte_cost() * (env::storage_usage() - used_bytes.0) as u128;
-            if cost >= refund_amount {
-                return;
-            } else {
-                refund_amount -= cost;
-            }
-        }
-        Promise::new(caller).transfer(refund_amount);
-    }
 }
+
+utils::impl_storage_check_and_refund!(Contract);
 
 #[derive(BorshSerialize, BorshStorageKey)]
 pub enum StorageKey {

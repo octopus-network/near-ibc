@@ -2,10 +2,10 @@ use ibc::core::ics24_host::identifier::ChannelId;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env,
-    json_types::{Base58CryptoHash, U128},
+    json_types::U128,
     near_bindgen,
     store::UnorderedSet,
-    AccountId, Balance, BorshStorageKey, Gas, PanicOnDefault, PromiseOrValue,
+    AccountId, BorshStorageKey, PanicOnDefault, PromiseOrValue,
 };
 
 #[derive(BorshSerialize, BorshStorageKey)]
@@ -49,19 +49,6 @@ impl ChannelEscrow {
     }
     ///
     pub fn transfer(&mut self, base_denom: String, receiver_id: AccountId, amount: U128) {
-        assert_root_account();
         todo!()
     }
-}
-
-//
-fn assert_root_account() {
-    let account_id = String::from(env::current_account_id().as_str());
-    let parts = account_id.split(".").collect::<Vec<&str>>();
-    let root_account = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
-    assert_eq!(
-        env::predecessor_account_id().to_string(),
-        root_account,
-        "ERR_ONLY_ROOT_ACCOUNT_CAN_CALL_THIS_METHOD"
-    );
 }

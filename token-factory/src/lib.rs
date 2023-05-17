@@ -1,34 +1,21 @@
-use ibc::core::ics24_host::identifier::{ChannelId, PortId};
+use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::{
+    assert_self,
     borsh::{self, BorshDeserialize, BorshSerialize},
     env,
-    json_types::{Base58CryptoHash, U128},
-    near_bindgen,
+    json_types::{Base58CryptoHash, U128, U64},
+    log, near_bindgen,
     serde::{Deserialize, Serialize},
     store::UnorderedMap,
-    AccountId, Balance, BorshStorageKey, Gas, PanicOnDefault, Promise,
+    AccountId, BorshStorageKey, PanicOnDefault, Promise,
 };
-
-/// Initial balance for the token contract to cover storage deposit.
-const TOKEN_CONTRACT_INIT_BALANCE: Balance = 5_000_000_000_000_000_000_000_000;
-/// Gas attached to the token contract creation.
-const GAS_FOR_TOKEN_CONTRACT_INIT: Gas = Gas(5_000_000_000_000);
-/// Gas attached to the token contract mint.
-const GAS_FOR_TOKEN_CONTRACT_MINT: Gas = Gas(5_000_000_000_000);
-/// Gas attached to the token contract burn.
-const GAS_FOR_TOKEN_CONTRACT_BURN: Gas = Gas(5_000_000_000_000);
+use utils::types::AssetDenom;
 
 #[derive(BorshSerialize, BorshStorageKey)]
 pub enum StorageKey {
     AssetIdMappings,
     DenomMappings,
     TokenContractWasm,
-}
-
-#[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq, PartialOrd, Ord)]
-pub struct AssetDenom {
-    pub trace_path: Vec<(PortId, ChannelId)>,
-    pub base_denom: String,
 }
 
 #[near_bindgen]
@@ -54,26 +41,25 @@ impl TokenFactory {
             denom_mappings: UnorderedMap::new(StorageKey::DenomMappings),
         }
     }
-    /// Create a new token contract and mint the given amount of tokens to the given owner.
     #[payable]
-    pub fn mint_asset(
+    /// Create a new token contract.
+    pub fn setup_asset(
         &mut self,
-        trace_path: Vec<(PortId, ChannelId)>,
+        trace_path: String,
         base_denom: String,
-        token_owner: AccountId,
-        amount: U128,
+        metadata: FungibleTokenMetadata,
     ) {
-        assert_root_account();
+        utils::assert_grandparent_account();
         let asset_denom = AssetDenom {
             trace_path,
             base_denom,
         };
+        let minimum_deposit = utils::BALANCE_FOR_TOKEN_CONTRACT_INIT
+            + env::storage_byte_cost() * (asset_denom.try_to_vec().unwrap().len() + 32) as u128 * 2;
         assert!(
-            env::attached_deposit()
-                > env::storage_byte_cost()
-                    * (asset_denom.try_to_vec().unwrap().len() + 32) as u128
-                    * 2,
-            "ERR_NOT_ENOUGH_DEPOSIT"
+            env::attached_deposit() >= minimum_deposit,
+            "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
+            minimum_deposit
         );
         let used_bytes = env::storage_usage();
         if !self.denom_mappings.contains_key(&asset_denom) {
@@ -94,29 +80,72 @@ impl TokenFactory {
                 retry += 1;
                 assert!(retry < 255, "ERR_TOO_MANY_RETRIES_IN_ASSET_ID_GENERATION");
             }
-            self.asset_id_mappings
-                .insert(asset_id.clone(), asset_denom.clone());
-            self.denom_mappings
-                .insert(asset_denom.clone(), asset_id.clone());
             // Create token contract.
             let token_contract_id: AccountId =
                 format!("{}.{}", asset_id, env::current_account_id())
                     .parse()
                     .unwrap();
+            #[derive(Serialize, Deserialize, Clone)]
+            #[serde(crate = "near_sdk::serde")]
+            struct Input {
+                pub metadata: FungibleTokenMetadata,
+            }
+            let args = Input { metadata };
+            let args =
+                near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_FUNCTION");
             Promise::new(token_contract_id)
                 .create_account()
-                .transfer(TOKEN_CONTRACT_INIT_BALANCE)
+                .transfer(utils::BALANCE_FOR_TOKEN_CONTRACT_INIT)
                 .deploy_contract(
                     env::storage_read(&StorageKey::TokenContractWasm.try_to_vec().unwrap())
                         .unwrap(),
                 )
                 .function_call(
                     "new".to_string(),
-                    Vec::new(),
+                    args,
                     0,
-                    GAS_FOR_TOKEN_CONTRACT_INIT,
+                    utils::GAS_FOR_TOKEN_CONTRACT_INIT,
                 );
+            // Store mappings.
+            self.asset_id_mappings
+                .insert(asset_id.clone(), asset_denom.clone());
+            self.denom_mappings
+                .insert(asset_denom.clone(), asset_id.clone());
         }
+        // Refund unused deposit.
+        utils::refund_deposit(
+            used_bytes,
+            env::attached_deposit() - utils::BALANCE_FOR_TOKEN_CONTRACT_INIT,
+        );
+    }
+
+    /// Create a new token contract and mint the given amount of tokens to the given owner.
+    #[payable]
+    pub fn mint_asset(
+        &mut self,
+        trace_path: String,
+        base_denom: String,
+        token_owner: AccountId,
+        amount: U128,
+    ) {
+        utils::assert_grandparent_account();
+        let asset_denom = AssetDenom {
+            trace_path,
+            base_denom,
+        };
+        assert!(
+            env::attached_deposit()
+                > utils::BALANCE_FOR_TOKEN_CONTRACT_MINT
+                    + env::storage_byte_cost()
+                        * (asset_denom.try_to_vec().unwrap().len() + 32) as u128
+                        * 2,
+            "ERR_NOT_ENOUGH_DEPOSIT"
+        );
+        assert!(
+            self.denom_mappings.contains_key(&asset_denom),
+            "ERR_ASSET_NEEDS_TO_BE_SETUP"
+        );
+        let used_bytes = env::storage_usage();
         // Mint tokens.
         let asset_id = self.denom_mappings.get(&asset_denom).unwrap();
         let token_contract_id: AccountId = format!("{}.{}", asset_id, env::current_account_id())
@@ -137,20 +166,24 @@ impl TokenFactory {
         Promise::new(token_contract_id).function_call(
             "mint".to_string(),
             args,
-            0,
-            GAS_FOR_TOKEN_CONTRACT_MINT,
+            utils::BALANCE_FOR_TOKEN_CONTRACT_MINT,
+            utils::GAS_FOR_TOKEN_CONTRACT_MINT,
         );
-        refund_deposit(used_bytes);
+        // Refund unused deposit.
+        utils::refund_deposit(
+            used_bytes,
+            env::attached_deposit() - utils::BALANCE_FOR_TOKEN_CONTRACT_MINT,
+        );
     }
     ///
     pub fn burn_asset(
         &mut self,
-        trace_path: Vec<(PortId, ChannelId)>,
+        trace_path: String,
         base_denom: String,
         token_owner: AccountId,
         amount: U128,
     ) {
-        assert_root_account();
+        utils::assert_grandparent_account();
         let asset_denom = AssetDenom {
             trace_path,
             base_denom,
@@ -180,32 +213,12 @@ impl TokenFactory {
             "burn".to_string(),
             args,
             0,
-            GAS_FOR_TOKEN_CONTRACT_BURN,
+            utils::GAS_FOR_TOKEN_CONTRACT_BURN,
         );
     }
 }
 
-/// Asserts that the predecessor account is the root account.
-fn assert_root_account() {
-    let account_id = String::from(env::current_account_id().as_str());
-    let parts = account_id.split(".").collect::<Vec<&str>>();
-    let root_account = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
-    assert_eq!(
-        env::predecessor_account_id().to_string(),
-        root_account,
-        "ERR_ONLY_ROOT_ACCOUNT_CAN_CALL_THIS_METHOD"
-    );
-}
-
-/// Refunds deposit if it is more than used for storage.
-fn refund_deposit(previously_used_bytes: u64) {
-    if env::storage_usage() > previously_used_bytes {
-        let newly_used_bytes = env::storage_usage() - previously_used_bytes;
-        let refund_amount =
-            env::attached_deposit() - env::storage_byte_cost() * newly_used_bytes as u128;
-        Promise::new(env::predecessor_account_id()).transfer(refund_amount);
-    }
-}
+utils::impl_storage_check_and_refund!(TokenFactory);
 
 /// Stores attached data into blob store and returns hash of it.
 /// Implemented to avoid loading the data into WASM for optimal gas usage.

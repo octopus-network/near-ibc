@@ -1,6 +1,5 @@
+use crate::context::NearRouterContext;
 use core::fmt::{Debug, Formatter};
-
-use crate::context::{NearIbcStore, NearIbcStoreHost, NearRouterContext};
 use ibc::{
     core::{
         ics02_client::{
@@ -24,14 +23,7 @@ use ibc::{
         },
         ics05_port::{context::PortReader, error::PortError},
         ics23_commitment::commitment::CommitmentPrefix,
-        ics24_host::{
-            identifier::{ChannelId, ClientId, ConnectionId, PortId},
-            path::{
-                AcksPath, ChannelEndsPath, CommitmentsPath, ConnectionsPath, ReceiptsPath,
-                SeqAcksPath, SeqRecvsPath, SeqSendsPath,
-            },
-            Path,
-        },
+        ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
         ics26_routing::context::{Module, ModuleId, Router, RouterBuilder, RouterContext},
     },
     timestamp::Timestamp,

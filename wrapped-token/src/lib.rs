@@ -3,11 +3,12 @@ use near_contract_standards::fungible_token::{
     FungibleToken,
 };
 use near_sdk::{
+    assert_self,
     borsh::{self, BorshDeserialize, BorshSerialize},
     collections::LazyOption,
     env,
-    json_types::U128,
-    near_bindgen, AccountId, PanicOnDefault, Promise, PromiseOrValue,
+    json_types::{U128, U64},
+    log, near_bindgen, AccountId, PanicOnDefault, Promise, PromiseOrValue,
 };
 
 #[near_bindgen]
@@ -41,21 +42,21 @@ impl WrappedToken {
     /// Only the parent account can call this method.
     #[payable]
     pub fn mint(&mut self, account_id: AccountId, amount: U128) {
-        assert_parent();
+        utils::assert_parent_account();
         self.storage_deposit(Some(account_id.clone()), None);
         self.token.internal_deposit(&account_id, amount.into());
     }
     /// Burn tokens from the given account.
     /// Only the parent account can call this method.
     pub fn burn(&mut self, account_id: AccountId, amount: U128) {
-        assert_parent();
+        utils::assert_parent_account();
         self.token.internal_withdraw(&account_id, amount.into());
     }
     /// Set the icon to the token's metadata.
     /// Only the parent account can call this method.
     #[payable]
     pub fn set_icon(&mut self, icon: String) {
-        assert_parent();
+        utils::assert_parent_account();
         assert!(
             env::attached_deposit()
                 >= env::storage_byte_cost() * icon.clone().into_bytes().len() as u128,
@@ -65,17 +66,19 @@ impl WrappedToken {
         let mut metadata = self.metadata.get().unwrap();
         metadata.icon = Some(icon);
         self.metadata.set(&metadata);
-        refund_deposit(used_bytes);
+        // Refund the unused attached deposit.
+        utils::refund_deposit(used_bytes, env::attached_deposit());
     }
     /// Set the name, symbol and decimals to the token's metadata.
     /// Only the parent account can call this method.
     #[payable]
     pub fn set_basic_metadata(&mut self, name: String, symbol: String, decimals: u8) {
-        assert_parent();
+        utils::assert_parent_account();
         assert!(
             env::attached_deposit()
                 >= env::storage_byte_cost()
-                    * (name.clone().into_bytes().len() + symbol.clone().into_bytes().len()) as u128,
+                    * (name.clone().into_bytes().len() + symbol.clone().into_bytes().len() + 1)
+                        as u128,
             "ERR_NOT_ENOUGH_DEPOSIT"
         );
         let used_bytes = env::storage_usage();
@@ -84,32 +87,14 @@ impl WrappedToken {
         metadata.symbol = symbol;
         metadata.decimals = decimals;
         self.metadata.set(&metadata);
-        refund_deposit(used_bytes);
-    }
-}
-
-// Asserts that the predecessor is the parent account.
-fn assert_parent() {
-    let account_id = String::from(env::current_account_id().as_str());
-    let (_first, parent) = account_id.split_once(".").unwrap();
-    assert_eq!(
-        env::predecessor_account_id().as_str(),
-        parent,
-        "ERR_ONLY_PARENT_ACCOUNT_CAN_CALL_THIS_METHOD"
-    );
-}
-
-fn refund_deposit(previously_used_bytes: u64) {
-    if env::storage_usage() > previously_used_bytes {
-        let newly_used_bytes = env::storage_usage() - previously_used_bytes;
-        let refund_amount =
-            env::attached_deposit() - env::storage_byte_cost() * newly_used_bytes as u128;
-        Promise::new(env::predecessor_account_id()).transfer(refund_amount);
+        // Refund the unused attached deposit.
+        utils::refund_deposit(used_bytes, env::attached_deposit());
     }
 }
 
 near_contract_standards::impl_fungible_token_core!(WrappedToken, token);
 near_contract_standards::impl_fungible_token_storage!(WrappedToken, token);
+utils::impl_storage_check_and_refund!(WrappedToken);
 
 #[near_bindgen]
 impl FungibleTokenMetadataProvider for WrappedToken {

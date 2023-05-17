@@ -902,8 +902,11 @@ dependencies = [
  "ibc",
  "ibc-proto",
  "itertools",
+ "near-contract-standards",
  "near-sdk",
  "sha2 0.10.6",
+ "token-factory",
+ "utils",
 ]
 
 [[package]]
@@ -1846,8 +1849,9 @@ name = "token-factory"
 version = "0.1.0"
 dependencies = [
  "hex",
- "ibc",
+ "near-contract-standards",
  "near-sdk",
+ "utils",
 ]
 
 [[package]]
@@ -1928,6 +1932,13 @@ name = "unicode-xid"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f962df74c8c05a667b5ee8bcf162993134c104e96440b663c8daa176dc772d8c"
+
+[[package]]
+name = "utils"
+version = "0.1.0"
+dependencies = [
+ "near-sdk",
+]
 
 [[package]]
 name = "version_check"
@@ -2131,6 +2142,7 @@ version = "0.1.0"
 dependencies = [
  "near-contract-standards",
  "near-sdk",
+ "utils",
 ]
 
 [[package]]

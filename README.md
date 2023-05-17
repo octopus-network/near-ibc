@@ -32,11 +32,14 @@ This account is for deploying token contracts for assets from other chains. The 
 
 The contract `token-factory` will at least provide the following interfaces (functions):
 
+* Function `setup_asset`:
+  * Only the root account can call this function. The original caller is the governance account set in `near-ibc` contract.
+  * This function checks whether the sub-account for the asset corresponding to the `denomination` of the coin (passed by the caller) exists. If not, a new sub-account will be created and initialized automatically.
+  * When it is necessary to create sub-account for a new asset, this function will also check for duplication of both `denomination` and `asset id` (refer to [sub-accounts for assets from other chains](#sub-accounts-for-assets-from-other-chains)) in order to avoid hash collisions. Besides, the mappings of `denomination` and `asset id` will also be stored in this contract.
 * Function `mint_asset`:
   * Only the root account can call this function.
   * This function will be called in function `BankKeeper::mint_coins`, which is implemented by the `transfer` module.
-  * This function checks whether the sub-account for the asset corresponding to the `denomination` of the coin (passed by the caller) exists. If not, a new sub-account will be created and initialized automatically. Then, the `mint` function of the contract of the sub-account will be called automatically. (Also refer to [sub-accounts for assets from other chains](#sub-accounts-for-assets-from-other-chains).)
-  * When it is necessary to create sub-account for a new asset, this function will also check for duplication of both `denomination` and `asset id` (refer to [sub-accounts for assets from other chains](#sub-accounts-for-assets-from-other-chains)) in order to avoid hash collisions. Besides, the mappings of `denomination` and `asset id` will also be stored in this contract.
+  * This function will call the `mint` function of the contract of the sub-account automatically. (Also refer to [sub-accounts for assets from other chains](#sub-accounts-for-assets-from-other-chains).)
 * Function `burn_asset`:
   * Only the root account can call this function.
   * This function will be called in function `BankKeeper::burn_coins`, which is implemented by the `transfer` module.
