@@ -3,6 +3,7 @@ use crate::*;
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct OldContract {
     near_ibc_store: LazyOption<NearIbcStore>,
+    ibc_events_history: IndexedLookupQueue<u64, Vec<u8>>,
     governance_account: AccountId,
 }
 
@@ -18,6 +19,7 @@ impl Contract {
         // Create the new contract using the data from the old contract.
         let new_contract = Contract {
             near_ibc_store: old_contract.near_ibc_store,
+            ibc_events_history: old_contract.ibc_events_history,
             governance_account: old_contract.governance_account,
         };
         //

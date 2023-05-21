@@ -74,6 +74,10 @@ pub trait Viewer {
     fn get_packet_acknowledgements(&self, port_id: PortId, channel_id: ChannelId) -> Vec<Sequence>;
     /// Get the commitment packet stored on this host.
     fn get_commitment_prefix(&self) -> CommitmentPrefix;
+    /// Get the heights that ibc events happened on.
+    fn get_ibc_events_heights(&self) -> Vec<u64>;
+    /// Get ibc events happened on the given height.
+    fn get_ibc_events_at(&self, height: u64) -> Vec<IbcEvent>;
 }
 
 #[near_bindgen]
@@ -350,5 +354,22 @@ impl Viewer for Contract {
     fn get_commitment_prefix(&self) -> CommitmentPrefix {
         CommitmentPrefix::try_from(DEFAULT_COMMITMENT_PREFIX.as_bytes().to_vec())
             .unwrap_or_default()
+    }
+
+    fn get_ibc_events_heights(&self) -> Vec<u64> {
+        self.ibc_events_history
+            .keys()
+            .iter()
+            .filter(|h| h.is_some())
+            .map(|h| h.unwrap())
+            .collect()
+    }
+
+    fn get_ibc_events_at(&self, height: u64) -> Vec<IbcEvent> {
+        let raw_events = self
+            .ibc_events_history
+            .get_value_by_key(&height)
+            .map_or_else(|| vec![], |events| events);
+        Vec::<IbcEvent>::try_from_slice(&raw_events).unwrap_or_else(|_| vec![])
     }
 }

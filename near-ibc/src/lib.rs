@@ -2,11 +2,15 @@ use crate::{
     context::{NearIbcStore, NearRouterContext},
     events::EventEmit,
 };
-use ibc::core::{
-    ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
-    ics26_routing::handler::MsgReceipt,
+use ibc::{
+    core::{
+        ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
+        ics26_routing::handler::MsgReceipt,
+    },
+    events::IbcEvent,
 };
 use ibc_proto::google::protobuf::Any;
+use indexed_lookup_queue::IndexedLookupQueue;
 use itertools::Itertools;
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::{
@@ -39,6 +43,7 @@ const MINIMUM_ATTACHED_NEAR_FOR_DELEVER_MSG: u128 = 100_000_000_000_000_000_000_
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct Contract {
     near_ibc_store: LazyOption<NearIbcStore>,
+    ibc_events_history: IndexedLookupQueue<u64, Vec<u8>>,
     governance_account: AccountId,
 }
 
@@ -71,6 +76,11 @@ impl Contract {
                     port_to_module: LookupMap::new(StorageKey::PortToModule),
                     packet_commitments: LookupMap::new(StorageKey::PacketCommitment),
                 }),
+            ),
+            ibc_events_history: IndexedLookupQueue::new(
+                StorageKey::IbcEventsHistoryIndex,
+                StorageKey::IbcEventsHistoryKey,
+                u64::MAX,
             ),
             governance_account: env::current_account_id(),
         }
@@ -108,9 +118,13 @@ impl Contract {
 
         log!("near ibc deliver logs: {:?}", logs);
         log!("near ibc deliver errors: {:?}", errors);
-        for event in events {
+        for event in &events {
             event.emit();
         }
+        // Save the IBC events history.
+        let raw_ibc_events = events.try_to_vec().unwrap();
+        self.ibc_events_history
+            .push_back((env::block_height(), raw_ibc_events));
         // Refund unused deposit.
         utils::refund_deposit(previously_used_bytes, env::attached_deposit());
     }
@@ -167,6 +181,11 @@ impl Contract {
             env::attached_deposit(),
             GAS_FOR_SETUP_ASSET,
         );
+    }
+    /// Set the max length of the IBC events history queue.
+    pub fn set_max_length_of_ibc_events_history(&mut self, max_length: u64) {
+        self.assert_governance();
+        self.ibc_events_history.set_max_length(max_length);
     }
 }
 
@@ -239,6 +258,8 @@ pub enum StorageKey {
         channel_id: ChannelId,
     },
     NearIbcStore,
+    IbcEventsHistoryIndex,
+    IbcEventsHistoryKey,
 }
 
 #[no_mangle]

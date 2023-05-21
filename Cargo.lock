@@ -656,7 +656,7 @@ dependencies = [
 [[package]]
 name = "ibc"
 version = "0.28.0"
-source = "git+https://github.com/octopus-network/ibc-rs.git?branch=rivers/near-ibc#8de5169d78169189ffebb5256e695fc86d3adc1b"
+source = "git+https://github.com/octopus-network/ibc-rs.git?branch=rivers/near-ibc#4befb18035011cc3a57f34ebfbd64ec2bcb20bec"
 dependencies = [
  "borsh",
  "bytes",
