@@ -81,7 +81,30 @@ impl BankKeeper for TransferModule {
         account: &Self::AccountId,
         amt: &PrefixedCoin,
     ) -> Result<(), TokenTransferError> {
-        todo!()
+        log!(
+            "Burning coins for account {}, trace path {}, base denom {}",
+            account.0,
+            amt.denom.trace_path,
+            amt.denom.base_denom
+        );
+        #[derive(Serialize, Deserialize, Clone)]
+        #[serde(crate = "near_sdk::serde")]
+        struct Input {
+            pub account_id: String,
+            pub amount: U128,
+        }
+        let args = Input {
+            account_id: account.0.to_string(),
+            amount: U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
+        };
+        let args = near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_ASSET");
+        Promise::new(env::predecessor_account_id()).function_call(
+            "burn".to_string(),
+            args,
+            0,
+            utils::GAS_FOR_TOKEN_CONTRACT_BURN,
+        );
+        Ok(())
     }
 }
 

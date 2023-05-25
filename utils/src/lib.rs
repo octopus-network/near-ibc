@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use near_sdk::{
     env,
     json_types::{U128, U64},
@@ -10,17 +12,17 @@ pub mod types;
 
 /// Gas for calling `check_storage_and_refund` function.
 pub const GAS_FOR_CHECK_STORAGE_AND_REFUND: Gas = Gas(5_000_000_000_000);
-/// Gas attached to the function call of `setup_asset` on token factory contract.
+/// Gas for calling `setup_asset` function on token factory contract.
 pub const GAS_FOR_SETUP_ASSET: Gas = Gas(100_000_000_000_000);
-/// Gas attached to the function call of `mint_asset` on token factory contract.
+/// Gas for calling `mint_asset` function on token factory contract.
 pub const GAS_FOR_MINT_ASSET: Gas = Gas(30_000_000_000_000);
-/// Gas attached to the function call of `burn_asset` on token factory contract.
-pub const GAS_FOR_BURN_ASSET: Gas = Gas(20_000_000_000_000);
-/// Gas attached to the token contract creation.
+/// Gas for calling `do_send_transfer` function on NEAR ibc contract.
+pub const GAS_FOR_DO_SEND_TRANSFER: Gas = Gas(150_000_000_000_000);
+/// Gas for the token contract creation.
 pub const GAS_FOR_TOKEN_CONTRACT_INIT: Gas = Gas(5_000_000_000_000);
-/// Gas attached to the token contract mint.
+/// Gas for calling `mint` function on wrapped token contract.
 pub const GAS_FOR_TOKEN_CONTRACT_MINT: Gas = Gas(5_000_000_000_000);
-/// Gas attached to the token contract burn.
+/// Gas for calling `burn` function on wrapped token contract.
 pub const GAS_FOR_TOKEN_CONTRACT_BURN: Gas = Gas(5_000_000_000_000);
 /// Initial balance for the token contract to cover storage deposit.
 pub const BALANCE_FOR_TOKEN_CONTRACT_INIT: Balance = 3_000_000_000_000_000_000_000_000;
@@ -107,6 +109,37 @@ pub fn assert_grandparent_account() {
     );
 }
 
+/// Asserts that the predecessor account is the sub account of current account.
+pub fn assert_sub_account() {
+    let account_id = env::predecessor_account_id().to_string();
+    let (_first, parent) = account_id.split_once(".").unwrap();
+    assert!(
+        parent.ends_with(env::current_account_id().as_str()),
+        "ERR_ONLY_SUB_ACCOUNT_CAN_CALL_THIS_METHOD"
+    );
+}
+
+/// Asserts that the predecessor account is an ancestor account of current account.
+pub fn assert_ancestor_account() {
+    let account_id = env::current_account_id().to_string();
+    let (_first, parent) = account_id.split_once(".").unwrap();
+    assert!(
+        parent.ends_with(env::predecessor_account_id().as_str()),
+        "ERR_ONLY_UPPER_LEVEL_ACCOUNT_CAN_CALL_THIS_METHOD"
+    );
+}
+
+/// Get the grandparent account id from the current account id.
+pub fn get_grandparent_account_id() -> AccountId {
+    let account_id = String::from(env::current_account_id().as_str());
+    let parts = account_id.split(".").collect::<Vec<&str>>();
+    assert!(parts.len() > 3, "ERR_NO_GRANDPARENT_ACCOUNT_FOUND");
+    let grandparent_account = parts[2..parts.len()].join(".");
+    AccountId::from_str(grandparent_account.as_str()).unwrap()
+}
+
+/// Get the token factory contract id by directly appending a certain suffix
+/// to the current account id.
 pub fn get_token_factory_contract_id() -> AccountId {
     format!("tf.transfer.{}", env::current_account_id())
         .parse()

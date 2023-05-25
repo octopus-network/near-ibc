@@ -45,14 +45,16 @@ impl TokenFactory {
     /// Create a new token contract.
     pub fn setup_asset(
         &mut self,
+        port_id: String,
+        channel_id: String,
         trace_path: String,
         base_denom: String,
         metadata: FungibleTokenMetadata,
     ) {
-        utils::assert_grandparent_account();
+        utils::assert_ancestor_account();
         let asset_denom = AssetDenom {
-            trace_path,
-            base_denom,
+            trace_path: trace_path.clone(),
+            base_denom: base_denom.clone(),
         };
         let minimum_deposit = utils::BALANCE_FOR_TOKEN_CONTRACT_INIT
             + env::storage_byte_cost() * (asset_denom.try_to_vec().unwrap().len() + 32) as u128 * 2;
@@ -89,8 +91,20 @@ impl TokenFactory {
             #[serde(crate = "near_sdk::serde")]
             struct Input {
                 pub metadata: FungibleTokenMetadata,
+                port_id: String,
+                channel_id: String,
+                trace_path: String,
+                base_denom: String,
+                near_ibc_account: AccountId,
             }
-            let args = Input { metadata };
+            let args = Input {
+                metadata,
+                port_id,
+                channel_id,
+                trace_path,
+                base_denom,
+                near_ibc_account: utils::get_grandparent_account_id(),
+            };
             let args =
                 near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_FUNCTION");
             Promise::new(token_contract_id)
@@ -128,7 +142,7 @@ impl TokenFactory {
         token_owner: AccountId,
         amount: U128,
     ) {
-        utils::assert_grandparent_account();
+        utils::assert_ancestor_account();
         let asset_denom = AssetDenom {
             trace_path,
             base_denom,
@@ -175,47 +189,6 @@ impl TokenFactory {
             env::attached_deposit() - utils::BALANCE_FOR_TOKEN_CONTRACT_MINT,
         );
     }
-    ///
-    pub fn burn_asset(
-        &mut self,
-        trace_path: String,
-        base_denom: String,
-        token_owner: AccountId,
-        amount: U128,
-    ) {
-        utils::assert_grandparent_account();
-        let asset_denom = AssetDenom {
-            trace_path,
-            base_denom,
-        };
-        assert!(
-            self.denom_mappings.contains_key(&asset_denom),
-            "ERR_ASSET_NOT_FOUND"
-        );
-        // Burn tokens.
-        let asset_id = self.denom_mappings.get(&asset_denom).unwrap();
-        let token_contract_id: AccountId = format!("{}.{}", asset_id, env::current_account_id())
-            .parse()
-            .unwrap();
-        #[derive(Serialize, Deserialize, Clone)]
-        #[serde(crate = "near_sdk::serde")]
-        struct Input {
-            pub account_id: AccountId,
-            pub amount: U128,
-        }
-        let args = Input {
-            account_id: token_owner,
-            amount,
-        };
-        let args =
-            near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_BURN_FUNCTION");
-        Promise::new(token_contract_id).function_call(
-            "burn".to_string(),
-            args,
-            0,
-            utils::GAS_FOR_TOKEN_CONTRACT_BURN,
-        );
-    }
 }
 
 utils::impl_storage_check_and_refund!(TokenFactory);
@@ -234,15 +207,21 @@ pub extern "C" fn store_wasm_of_token_contract() {
     let input = env::input().expect("ERR_NO_INPUT");
     let sha256_hash = env::sha256(&input);
 
+    let current_len = env::storage_read(&StorageKey::TokenContractWasm.try_to_vec().unwrap())
+        .map_or_else(|| 0, |bytes| bytes.len());
     let blob_len = input.len();
-    let storage_cost = ((blob_len + 32) as u128) * env::storage_byte_cost();
-    assert!(
-        env::attached_deposit() >= storage_cost,
-        "ERR_NOT_ENOUGH_DEPOSIT:{}",
-        storage_cost
-    );
+    if blob_len > current_len {
+        let storage_cost = (env::storage_usage() + blob_len as u64 - current_len as u64) as u128
+            * env::storage_byte_cost();
+        assert!(
+            env::account_balance() >= storage_cost,
+            "ERR_NOT_ENOUGH_ACCOUNT_BALANCE, needs {} more.",
+            storage_cost - env::account_balance()
+        );
+    }
 
     env::storage_write(&StorageKey::TokenContractWasm.try_to_vec().unwrap(), &input);
+
     let mut blob_hash = [0u8; 32];
     blob_hash.copy_from_slice(&sha256_hash);
     let blob_hash_str = near_sdk::serde_json::to_string(&Base58CryptoHash::from(blob_hash))

@@ -1,13 +1,23 @@
 use crate::{
     context::{NearIbcStore, NearRouterContext},
     events::EventEmit,
+    ibc_impl::applications::transfer::TransferModule,
 };
 use ibc::{
+    applications::transfer::{
+        msgs::transfer::MsgTransfer, relay::send_transfer::send_transfer, Amount, BaseDenom,
+        PrefixedCoin, PrefixedDenom, TracePath,
+    },
     core::{
+        ics04_channel::timeout::TimeoutHeight,
         ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
         ics26_routing::handler::MsgReceipt,
     },
     events::IbcEvent,
+    handler::HandlerOutput,
+    signer::Signer,
+    timestamp::Timestamp,
+    Height,
 };
 use ibc_proto::google::protobuf::Any;
 use indexed_lookup_queue::IndexedLookupQueue;
@@ -25,7 +35,11 @@ use near_sdk::{
     store::{LookupMap, UnorderedMap},
     AccountId, BorshStorageKey, PanicOnDefault, Promise,
 };
-use utils::{types::AssetDenom, BALANCE_FOR_TOKEN_CONTRACT_INIT, GAS_FOR_SETUP_ASSET};
+use std::str::FromStr;
+use utils::{
+    types::{AssetDenom, MsgTransferPlan},
+    BALANCE_FOR_TOKEN_CONTRACT_INIT, GAS_FOR_SETUP_ASSET,
+};
 
 pub mod context;
 pub mod events;
@@ -141,6 +155,8 @@ impl Contract {
     #[payable]
     pub fn setup_token_contract(
         &mut self,
+        port_id: String,
+        channel_id: String,
         trace_path: String,
         base_denom: String,
         metadata: FungibleTokenMetadata,
@@ -165,11 +181,15 @@ impl Contract {
         #[derive(Serialize, Deserialize, Clone)]
         #[serde(crate = "near_sdk::serde")]
         struct Input {
-            pub trace_path: String,
-            pub base_denom: String,
-            pub metadata: FungibleTokenMetadata,
+            port_id: String,
+            channel_id: String,
+            trace_path: String,
+            base_denom: String,
+            metadata: FungibleTokenMetadata,
         }
         let args = Input {
+            port_id,
+            channel_id,
             trace_path: asset_denom.trace_path,
             base_denom: asset_denom.base_denom,
             metadata,
@@ -186,6 +206,90 @@ impl Contract {
     pub fn set_max_length_of_ibc_events_history(&mut self, max_length: u64) {
         self.assert_governance();
         self.ibc_events_history.set_max_length(max_length);
+    }
+    ///
+    pub fn do_send_transfer(&mut self, msg_transfer_plan: MsgTransferPlan) {
+        utils::assert_sub_account();
+        let mut output = HandlerOutput::<()>::builder();
+        if let Err(e) = send_transfer(
+            &mut TransferModule(),
+            &mut output,
+            MsgTransfer {
+                port_on_a: PortId::from_str(msg_transfer_plan.port_on_a.as_str()).unwrap(),
+                chan_on_a: ChannelId::from_str(msg_transfer_plan.chan_on_a.as_str()).unwrap(),
+                token: TransferringCoins {
+                    trace_path: msg_transfer_plan.token_trace_path.clone(),
+                    base_denom: msg_transfer_plan.token_denom.clone(),
+                    amount: msg_transfer_plan.amount.0.to_string(),
+                },
+                sender: Signer::from_str(msg_transfer_plan.sender.as_str()).unwrap(),
+                receiver: Signer::from_str(msg_transfer_plan.receiver.as_str()).unwrap(),
+                timeout_height_on_b: TimeoutHeight::At(
+                    Height::new(0, env::block_height() + 1000).unwrap(),
+                ),
+                timeout_timestamp_on_b: Timestamp::from_nanoseconds(
+                    env::block_timestamp() + 1000 * 1000000000,
+                )
+                .unwrap(),
+            },
+        ) {
+            log!("ERR_SEND_TRANSFER: {:?}", e);
+            log!(
+                "Cancelling burning coins for account {}, trace path {}, base denom {}",
+                msg_transfer_plan.sender,
+                msg_transfer_plan.token_trace_path,
+                msg_transfer_plan.token_denom
+            );
+            #[derive(Serialize, Deserialize, Clone)]
+            #[serde(crate = "near_sdk::serde")]
+            struct Input {
+                pub account_id: String,
+                pub amount: U128,
+            }
+            let args = Input {
+                account_id: msg_transfer_plan.sender,
+                amount: msg_transfer_plan.amount,
+            };
+            let args =
+                near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_ASSET");
+            Promise::new(env::predecessor_account_id()).function_call(
+                "cancel_burning".to_string(),
+                args,
+                0,
+                utils::GAS_FOR_TOKEN_CONTRACT_BURN,
+            );
+        }
+        let events = output.with_result(()).events;
+        for event in &events {
+            event.emit();
+        }
+        // Save the IBC events history.
+        let raw_ibc_events = events.try_to_vec().unwrap();
+        self.ibc_events_history
+            .push_back((env::block_height(), raw_ibc_events));
+    }
+}
+
+pub struct TransferringCoins {
+    pub trace_path: String,
+    pub base_denom: String,
+    pub amount: String,
+}
+
+impl TryInto<PrefixedCoin> for TransferringCoins {
+    type Error = String;
+
+    fn try_into(self) -> Result<PrefixedCoin, Self::Error> {
+        Ok(PrefixedCoin {
+            denom: PrefixedDenom {
+                trace_path: TracePath::from_str(self.trace_path.as_str())
+                    .map_err(|_| "ERR_INVALID_TRACE_PATH".to_string())?,
+                base_denom: BaseDenom::from_str(self.base_denom.as_str())
+                    .map_err(|_| "ERR_INVALID_BASE_DENOM".to_string())?,
+            },
+            amount: Amount::from_str(&self.amount.as_str())
+                .map_err(|_| "ERR_INVALID_AMOUNT".to_string())?,
+        })
     }
 }
 
