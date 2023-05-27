@@ -1,15 +1,17 @@
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::{
-    assert_self,
     borsh::{self, BorshDeserialize, BorshSerialize},
     env,
-    json_types::{Base58CryptoHash, U128, U64},
-    log, near_bindgen,
+    json_types::{Base58CryptoHash, U128},
+    near_bindgen,
     serde::{Deserialize, Serialize},
     store::UnorderedMap,
     AccountId, BorshStorageKey, PanicOnDefault, Promise,
 };
-use utils::types::AssetDenom;
+use utils::{
+    interfaces::{ext_wrapped_token, TokenFactory},
+    types::AssetDenom,
+};
 
 #[derive(BorshSerialize, BorshStorageKey)]
 pub enum StorageKey {
@@ -20,13 +22,13 @@ pub enum StorageKey {
 
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
-pub struct TokenFactory {
+pub struct Contract {
     asset_id_mappings: UnorderedMap<String, AssetDenom>,
     denom_mappings: UnorderedMap<AssetDenom, String>,
 }
 
 #[near_bindgen]
-impl TokenFactory {
+impl Contract {
     #[init]
     pub fn new() -> Self {
         assert!(!env::state_exists(), "ERR_ALREADY_INITIALIZED");
@@ -41,9 +43,14 @@ impl TokenFactory {
             denom_mappings: UnorderedMap::new(StorageKey::DenomMappings),
         }
     }
+}
+
+utils::impl_storage_check_and_refund!(Contract);
+
+#[near_bindgen]
+impl TokenFactory for Contract {
     #[payable]
-    /// Create a new token contract.
-    pub fn setup_asset(
+    fn setup_asset(
         &mut self,
         port_id: String,
         channel_id: String,
@@ -56,7 +63,7 @@ impl TokenFactory {
             trace_path: trace_path.clone(),
             base_denom: base_denom.clone(),
         };
-        let minimum_deposit = utils::BALANCE_FOR_TOKEN_CONTRACT_INIT
+        let minimum_deposit = utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT
             + env::storage_byte_cost() * (asset_denom.try_to_vec().unwrap().len() + 32) as u128 * 2;
         assert!(
             env::attached_deposit() >= minimum_deposit,
@@ -103,13 +110,13 @@ impl TokenFactory {
                 channel_id,
                 trace_path,
                 base_denom,
-                near_ibc_account: utils::get_grandparent_account_id(),
+                near_ibc_account: env::predecessor_account_id(),
             };
             let args =
                 near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_FUNCTION");
             Promise::new(token_contract_id)
                 .create_account()
-                .transfer(utils::BALANCE_FOR_TOKEN_CONTRACT_INIT)
+                .transfer(utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT)
                 .deploy_contract(
                     env::storage_read(&StorageKey::TokenContractWasm.try_to_vec().unwrap())
                         .unwrap(),
@@ -118,7 +125,7 @@ impl TokenFactory {
                     "new".to_string(),
                     args,
                     0,
-                    utils::GAS_FOR_TOKEN_CONTRACT_INIT,
+                    utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
                 );
             // Store mappings.
             self.asset_id_mappings
@@ -129,13 +136,12 @@ impl TokenFactory {
         // Refund unused deposit.
         utils::refund_deposit(
             used_bytes,
-            env::attached_deposit() - utils::BALANCE_FOR_TOKEN_CONTRACT_INIT,
+            env::attached_deposit() - utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT,
         );
     }
 
-    /// Create a new token contract and mint the given amount of tokens to the given owner.
     #[payable]
-    pub fn mint_asset(
+    fn mint_asset(
         &mut self,
         trace_path: String,
         base_denom: String,
@@ -148,14 +154,6 @@ impl TokenFactory {
             base_denom,
         };
         assert!(
-            env::attached_deposit()
-                > utils::BALANCE_FOR_TOKEN_CONTRACT_MINT
-                    + env::storage_byte_cost()
-                        * (asset_denom.try_to_vec().unwrap().len() + 32) as u128
-                        * 2,
-            "ERR_NOT_ENOUGH_DEPOSIT"
-        );
-        assert!(
             self.denom_mappings.contains_key(&asset_denom),
             "ERR_ASSET_NEEDS_TO_BE_SETUP"
         );
@@ -165,40 +163,21 @@ impl TokenFactory {
         let token_contract_id: AccountId = format!("{}.{}", asset_id, env::current_account_id())
             .parse()
             .unwrap();
-        #[derive(Serialize, Deserialize, Clone)]
-        #[serde(crate = "near_sdk::serde")]
-        struct Input {
-            pub account_id: AccountId,
-            pub amount: U128,
-        }
-        let args = Input {
-            account_id: token_owner,
-            amount,
-        };
-        let args =
-            near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_FUNCTION");
-        Promise::new(token_contract_id).function_call(
-            "mint".to_string(),
-            args,
-            utils::BALANCE_FOR_TOKEN_CONTRACT_MINT,
-            utils::GAS_FOR_TOKEN_CONTRACT_MINT,
-        );
-        // Refund unused deposit.
-        utils::refund_deposit(
-            used_bytes,
-            env::attached_deposit() - utils::BALANCE_FOR_TOKEN_CONTRACT_MINT,
-        );
+        ext_wrapped_token::ext(token_contract_id)
+            .with_attached_deposit(env::attached_deposit())
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+            .with_unused_gas_weight(0)
+            .mint(token_owner, amount);
+        utils::refund_deposit(used_bytes, env::attached_deposit());
     }
 }
-
-utils::impl_storage_check_and_refund!(TokenFactory);
 
 /// Stores attached data into blob store and returns hash of it.
 /// Implemented to avoid loading the data into WASM for optimal gas usage.
 #[no_mangle]
 pub extern "C" fn store_wasm_of_token_contract() {
     env::setup_panic_hook();
-    let _contract: TokenFactory = env::state_read().expect("ERR_CONTRACT_IS_NOT_INITIALIZED");
+    let _contract: Contract = env::state_read().expect("ERR_CONTRACT_IS_NOT_INITIALIZED");
     assert_eq!(
         env::predecessor_account_id(),
         env::current_account_id(),

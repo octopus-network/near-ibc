@@ -229,7 +229,9 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "ibc",
+ "near-contract-standards",
  "near-sdk",
+ "utils",
 ]
 
 [[package]]
@@ -417,6 +419,7 @@ dependencies = [
  "hex",
  "ibc",
  "near-sdk",
+ "utils",
 ]
 
 [[package]]
@@ -1852,6 +1855,8 @@ checksum = "f962df74c8c05a667b5ee8bcf162993134c104e96440b663c8daa176dc772d8c"
 name = "utils"
 version = "0.1.0"
 dependencies = [
+ "ibc",
+ "near-contract-standards",
  "near-sdk",
 ]
 

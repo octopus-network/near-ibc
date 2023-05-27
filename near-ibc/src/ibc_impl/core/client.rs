@@ -1,10 +1,6 @@
-use core::str::FromStr;
-
 use crate::{
-    context::NearIbcStore,
-    ibc_impl::core::host::{type_define::NearClientStatePath, TENDERMINT_CLIENT_TYPE},
-    indexed_lookup_queue::IndexedLookupQueue,
-    StorageKey,
+    context::NearIbcStore, ibc_impl::core::host::TENDERMINT_CLIENT_TYPE,
+    indexed_lookup_queue::IndexedLookupQueue, StorageKey,
 };
 use ibc::{
     clients::ics07_tendermint::{
@@ -19,20 +15,14 @@ use ibc::{
             context::{ClientKeeper, ClientReader},
             error::ClientError,
         },
-        ics24_host::{
-            identifier::ClientId,
-            path::{ClientConsensusStatePath, ClientStatePath, ClientTypePath},
-        },
+        ics24_host::identifier::ClientId,
     },
     mock::{consensus_state::MockConsensusState, header::MockHeader},
     timestamp::Timestamp,
     Height,
 };
 use ibc_proto::{google::protobuf::Any, protobuf::Protobuf};
-use near_sdk::{
-    borsh::{BorshDeserialize, BorshSerialize},
-    env, log,
-};
+use near_sdk::{env, log};
 
 impl ClientReader for NearIbcStore {
     /// Returns the ClientType for the given identifier `client_id`.

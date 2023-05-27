@@ -4,17 +4,21 @@ use near_contract_standards::fungible_token::{
     FungibleToken,
 };
 use near_sdk::{
-    assert_self,
     borsh::{self, BorshDeserialize, BorshSerialize},
     collections::LazyOption,
     env,
-    json_types::{U128, U64},
-    log, near_bindgen,
-    serde::{Deserialize, Serialize},
+    json_types::U128,
+    near_bindgen,
     store::UnorderedMap,
     AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseOrValue,
 };
-use utils::{types::MsgTransferPlan, BALANCE_FOR_TOKEN_CONTRACT_MINT, GAS_FOR_DO_SEND_TRANSFER};
+use utils::{
+    interfaces::{
+        ext_transfer_request_handler, NearIbcAccountAssertion, ProcessTransferRequestCallback,
+        WrappedToken,
+    },
+    types::Ics20TransferRequest,
+};
 
 #[derive(BorshSerialize, BorshStorageKey)]
 pub enum StorageKey {
@@ -29,7 +33,7 @@ pub enum StorageKey {
 /// from another chain on NEAR protocol.
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
-pub struct WrappedToken {
+pub struct Contract {
     /// The NEP-141 fungible token implementation.
     token: FungibleToken,
     /// The metadata of the token.
@@ -44,12 +48,12 @@ pub struct WrappedToken {
     base_denom: String,
     /// The account id of IBC/TAO implementation.
     near_ibc_account: AccountId,
-    /// Accounting for the pending burning requests.
-    pending_burnings: UnorderedMap<AccountId, Vec<MsgTransferPlan>>,
+    /// Accounting for the pending transfer requests.
+    pending_transfer_requests: UnorderedMap<AccountId, Ics20TransferRequest>,
 }
 
 #[near_bindgen]
-impl WrappedToken {
+impl Contract {
     #[init]
     pub fn new(
         metadata: FungibleTokenMetadata,
@@ -81,30 +85,94 @@ impl WrappedToken {
             trace_path,
             base_denom,
             near_ibc_account,
-            pending_burnings: UnorderedMap::new(StorageKey::PendingBurnings),
+            pending_transfer_requests: UnorderedMap::new(StorageKey::PendingBurnings),
         };
         this.token
             .internal_register_account(&env::current_account_id());
         this
     }
-    /// Asserts that the predecessor account is `near_ibc_account`.
-    fn assert_near_ibc_account(&self) {
-        assert_eq!(
-            env::predecessor_account_id(),
-            self.near_ibc_account,
-            "ERR_ONLY_NEAR_IBC_ACCOUNT_CAN_CALL_THIS_METHOD"
-        );
-    }
-    /// Mint tokens to the given account.
+    /// Request a transfer by burning a certain amount of tokens,
+    /// for sending them to another chain.
     ///
-    /// Only the parent account can call this method.
-    #[payable]
-    pub fn mint(&mut self, account_id: AccountId, amount: U128) {
-        utils::assert_parent_account();
+    /// This function is called by a certain token holder, when he/she wants to redeem
+    /// the token on NEAR protocol back to the source chain. It will send
+    /// a transfer plan to the IBC/TAO implementation.
+    pub fn request_transfer(&mut self, receiver_id: String, amount: U128) {
+        assert!(amount.0 > 0, "ERR_AMOUNT_MUST_BE_GREATER_THAN_ZERO");
+        let sender_id = env::predecessor_account_id();
         assert!(
-            env::attached_deposit() >= BALANCE_FOR_TOKEN_CONTRACT_MINT,
-            "ERR_NOT_ENOUGH_DEPOSIT"
+            self.token.ft_balance_of(sender_id.clone()) >= amount,
+            "ERR_NOT_ENOUGH_BALANCE"
         );
+        assert!(
+            !self.pending_transfer_requests.contains_key(&sender_id),
+            "ERR_PENDING_TRANSFER_REQUEST_EXISTS"
+        );
+        // Schedule a call to `process_transfer_request` on `near-ibc` contract.
+        let transfer_request = Ics20TransferRequest {
+            port_on_a: self.port_id.clone(),
+            chan_on_a: self.channel_id.clone(),
+            token_trace_path: self.trace_path.clone(),
+            token_denom: self.base_denom.clone(),
+            amount,
+            sender: sender_id.to_string(),
+            receiver: receiver_id,
+        };
+        ext_transfer_request_handler::ext(self.near_ibc_account.clone())
+            .with_attached_deposit(0)
+            .with_static_gas(utils::GAS_FOR_COMPLEX_FUNCTION_CALL)
+            .with_unused_gas_weight(0)
+            .process_transfer_request(transfer_request.clone());
+        // Record the pending transfer request.
+        self.pending_transfer_requests
+            .insert(sender_id.clone(), transfer_request);
+        // Transfer the tokens to the current account.
+        self.token.internal_withdraw(&sender_id, amount.into());
+        self.token
+            .internal_deposit(&env::current_account_id(), amount.into());
+        // Generate events.
+        FtBurn {
+            owner_id: &sender_id,
+            amount: &amount,
+            memo: None,
+        }
+        .emit();
+        FtMint {
+            owner_id: &env::current_account_id(),
+            amount: &amount,
+            memo: None,
+        }
+        .emit();
+    }
+    /// Assert that the given account has a pending transfer request with the given amount.
+    fn checked_remove_pending_transfer_request(
+        &mut self,
+        base_denom: &String,
+        account_id: &AccountId,
+        amount: U128,
+    ) {
+        assert!(
+            self.pending_transfer_requests.contains_key(&account_id),
+            "ERR_NO_PENDING_TRANSFER_REQUEST"
+        );
+        let req = self.pending_transfer_requests.get(&account_id).unwrap();
+        if !self.base_denom.eq(base_denom) || req.amount != amount {
+            panic!("ERR_PENDING_TRANSFER_REQUEST_NOT_MATCHED")
+        }
+        self.pending_transfer_requests.remove(&account_id);
+    }
+}
+
+near_contract_standards::impl_fungible_token_core!(Contract, token);
+near_contract_standards::impl_fungible_token_storage!(Contract, token);
+utils::impl_storage_check_and_refund!(Contract);
+
+#[near_bindgen]
+impl WrappedToken for Contract {
+    #[payable]
+    fn mint(&mut self, account_id: AccountId, amount: U128) {
+        utils::assert_parent_account();
+        let used_bytes = env::storage_usage();
         self.storage_deposit(Some(account_id.clone()), None);
         self.token.internal_deposit(&account_id, amount.into());
         FtMint {
@@ -113,153 +181,11 @@ impl WrappedToken {
             memo: None,
         }
         .emit();
+        utils::refund_deposit(used_bytes, env::attached_deposit());
     }
-    /// Burn tokens from the given account.
-    ///
-    /// Only the parent account can call this method.
-    ///
-    /// The calling is triggered by the IBC/TAO implementation, when all checkings
-    /// are passed for a `send_transfer` request from this contract.
-    /// The account id and amount must match a certain pending burning.
-    pub fn burn(&mut self, account_id: AccountId, amount: U128) {
-        self.assert_near_ibc_account();
-        let remained_pending_burnings = self.assert_pending_burning(&account_id, amount);
-        self.token
-            .internal_withdraw(&env::current_account_id(), amount.into());
-        self.update_pending_burnings_for(&account_id, remained_pending_burnings);
-        FtBurn {
-            owner_id: &env::current_account_id(),
-            amount: &amount,
-            memo: None,
-        }
-        .emit()
-    }
-    /// Assert that the given account has a pending burning request with the given amount.
-    fn assert_pending_burning(&self, account_id: &AccountId, amount: U128) -> Vec<MsgTransferPlan> {
-        assert!(
-            self.pending_burnings.contains_key(&account_id),
-            "ERR_NO_PENDING_BURNING"
-        );
-        let pending_burnings = self.pending_burnings.get(&account_id).unwrap();
-        let mut remained_pending_burnings: Vec<MsgTransferPlan> = vec![];
-        let mut matched = false;
-        for msg in pending_burnings {
-            if !matched && msg.amount == amount {
-                matched = true;
-            } else {
-                remained_pending_burnings.push(msg.clone());
-            }
-        }
-        assert!(matched, "ERR_NO_MATCHED_PENDING_BURNING");
-        remained_pending_burnings
-    }
-    /// Update the pending burnings for the given account.
-    fn update_pending_burnings_for(
-        &mut self,
-        account_id: &AccountId,
-        remained_pending_burnings: Vec<MsgTransferPlan>,
-    ) {
-        if remained_pending_burnings.len() > 0 {
-            self.pending_burnings
-                .insert(account_id.clone(), remained_pending_burnings);
-        } else {
-            self.pending_burnings.remove(&account_id);
-        }
-    }
-    /// Request to burn a certain amount of tokens, for sending them to another chain.
-    ///
-    /// This function is called by a certain token holder, when he/she wants to redeem
-    /// the token on NEAR protocol back to the source chain. It will send
-    /// a transfer plan to the IBC/TAO implementation.
-    pub fn request_burning(&mut self, receiver_id: String, amount: U128) {
-        assert!(amount.0 > 0, "ERR_AMOUNT_MUST_BE_GREATER_THAN_ZERO");
-        let sender = env::predecessor_account_id();
-        assert!(
-            self.token.ft_balance_of(sender.clone()) >= amount,
-            "ERR_NOT_ENOUGH_BALANCE"
-        );
-        let msg = MsgTransferPlan {
-            port_on_a: self.port_id.clone(),
-            chan_on_a: self.channel_id.clone(),
-            token_trace_path: self.trace_path.clone(),
-            token_denom: self.base_denom.clone(),
-            amount,
-            sender: sender.to_string(),
-            receiver: receiver_id,
-        };
-        #[derive(Serialize, Deserialize, Clone)]
-        #[serde(crate = "near_sdk::serde")]
-        struct Input {
-            msg_transfer_plan: MsgTransferPlan,
-        }
-        let args = Input {
-            msg_transfer_plan: msg.clone(),
-        };
-        let args =
-            near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_DO_SEND_TRANSFER");
-        Promise::new(self.near_ibc_account.clone()).function_call(
-            "do_send_transfer".to_string(),
-            args,
-            0,
-            GAS_FOR_DO_SEND_TRANSFER,
-        );
-        if self.pending_burnings.contains_key(&sender) {
-            self.pending_burnings
-                .get_mut(&env::predecessor_account_id())
-                .unwrap()
-                .push(msg.clone());
-        } else {
-            self.pending_burnings
-                .insert(sender.clone(), vec![msg.clone()]);
-        }
-        self.token.internal_withdraw(&sender, amount.into());
-        self.token
-            .internal_deposit(&env::current_account_id(), amount.into());
-        FtBurn {
-            owner_id: &sender,
-            amount: &amount,
-            memo: None,
-        }
-        .emit();
-        FtMint {
-            owner_id: &env::current_account_id(),
-            amount: &amount,
-            memo: None,
-        }
-        .emit();
-    }
-    /// Cancel a pending burning.
-    ///
-    /// Only the parent account can call this method.
-    ///
-    /// The calling is triggered by the IBC/TAO implementation, when error happens
-    /// in processing a `send_transfer` request from this contract.
-    /// The account id and amount must match a certain pending burning.
-    pub fn cancel_burning(&mut self, account_id: AccountId, amount: U128) {
-        self.assert_near_ibc_account();
-        let remained_pending_burnings = self.assert_pending_burning(&account_id, amount);
-        self.token
-            .internal_withdraw(&env::current_account_id(), amount.into());
-        self.token.internal_deposit(&account_id, amount.into());
-        self.update_pending_burnings_for(&account_id, remained_pending_burnings);
-        FtBurn {
-            owner_id: &env::current_account_id(),
-            amount: &amount,
-            memo: None,
-        }
-        .emit();
-        FtMint {
-            owner_id: &account_id,
-            amount: &amount,
-            memo: None,
-        }
-        .emit();
-    }
-    /// Set the icon to the token's metadata.
-    ///
-    /// Only the parent account can call this method.
+
     #[payable]
-    pub fn set_icon(&mut self, icon: String) {
+    fn set_icon(&mut self, icon: String) {
         utils::assert_parent_account();
         assert!(
             env::attached_deposit()
@@ -273,11 +199,9 @@ impl WrappedToken {
         // Refund the unused attached deposit.
         utils::refund_deposit(used_bytes, env::attached_deposit());
     }
-    /// Set the name, symbol and decimals to the token's metadata.
-    ///
-    /// Only the parent account can call this method.
+
     #[payable]
-    pub fn set_basic_metadata(&mut self, name: String, symbol: String, decimals: u8) {
+    fn set_basic_metadata(&mut self, name: String, symbol: String, decimals: u8) {
         utils::assert_parent_account();
         assert!(
             env::attached_deposit()
@@ -297,32 +221,73 @@ impl WrappedToken {
     }
 }
 
-near_contract_standards::impl_fungible_token_core!(WrappedToken, token);
-near_contract_standards::impl_fungible_token_storage!(WrappedToken, token);
-utils::impl_storage_check_and_refund!(WrappedToken);
+#[near_bindgen]
+impl ProcessTransferRequestCallback for Contract {
+    fn apply_transfer_request(&mut self, base_denom: String, sender_id: AccountId, amount: U128) {
+        self.assert_near_ibc_account();
+        self.checked_remove_pending_transfer_request(&base_denom, &sender_id, amount);
+        self.token
+            .internal_withdraw(&env::current_account_id(), amount.into());
+        FtBurn {
+            owner_id: &env::current_account_id(),
+            amount: &amount,
+            memo: None,
+        }
+        .emit()
+    }
+
+    fn cancel_transfer_request(&mut self, base_denom: String, sender_id: AccountId, amount: U128) {
+        self.assert_near_ibc_account();
+        self.checked_remove_pending_transfer_request(&base_denom, &sender_id, amount);
+        self.token
+            .internal_withdraw(&env::current_account_id(), amount.into());
+        self.token.internal_deposit(&sender_id, amount.into());
+        FtBurn {
+            owner_id: &env::current_account_id(),
+            amount: &amount,
+            memo: None,
+        }
+        .emit();
+        FtMint {
+            owner_id: &sender_id,
+            amount: &amount,
+            memo: None,
+        }
+        .emit();
+    }
+}
 
 #[near_bindgen]
-impl FungibleTokenMetadataProvider for WrappedToken {
+impl FungibleTokenMetadataProvider for Contract {
     fn ft_metadata(&self) -> FungibleTokenMetadata {
         self.metadata.get().unwrap()
     }
 }
 
+impl NearIbcAccountAssertion for Contract {
+    fn near_ibc_account(&self) -> AccountId {
+        self.near_ibc_account.clone()
+    }
+}
+
 /// View functions for the wrapped token.
 #[near_bindgen]
-impl WrappedToken {
+impl Contract {
     ///
     pub fn get_pending_accounts(&self) -> Vec<AccountId> {
-        self.pending_burnings
+        self.pending_transfer_requests
             .keys()
             .map(|account_id| account_id.clone())
             .collect()
     }
     ///
-    pub fn get_pending_burnings(&self, account_id: AccountId) -> Vec<MsgTransferPlan> {
-        self.pending_burnings
+    pub fn get_pending_transfer_request_of(
+        &self,
+        account_id: AccountId,
+    ) -> Option<Ics20TransferRequest> {
+        self.pending_transfer_requests
             .get(&account_id)
-            .map_or_else(|| vec![], |msgs| msgs.clone())
+            .map(|req| req.clone())
     }
 }
 
@@ -331,7 +296,7 @@ impl WrappedToken {
 #[no_mangle]
 pub extern "C" fn update_contract_code() {
     env::setup_panic_hook();
-    let _contract: WrappedToken = env::state_read().expect("ERR_CONTRACT_IS_NOT_INITIALIZED");
+    let _contract: Contract = env::state_read().expect("ERR_CONTRACT_IS_NOT_INITIALIZED");
     utils::assert_parent_account();
 
     let input = env::input().expect("ERR_NO_INPUT");

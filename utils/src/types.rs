@@ -10,9 +10,9 @@ pub struct AssetDenom {
     pub base_denom: String,
 }
 
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone)]
+#[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
-pub struct MsgTransferPlan {
+pub struct Ics20TransferRequest {
     pub port_on_a: String,
     pub chan_on_a: String,
     pub token_trace_path: String,

@@ -1,5 +1,4 @@
-use std::str::FromStr;
-
+use core::str::FromStr;
 use near_sdk::{
     env,
     json_types::{U128, U64},
@@ -7,38 +6,28 @@ use near_sdk::{
     AccountId, Balance, Gas, Promise,
 };
 
+pub mod interfaces;
 mod macros;
 pub mod types;
 
 /// Gas for calling `check_storage_and_refund` function.
 pub const GAS_FOR_CHECK_STORAGE_AND_REFUND: Gas = Gas(5_000_000_000_000);
-/// Gas for calling `setup_asset` function on token factory contract.
+/// Gas for calling `setup_asset` function of token factory contract.
 pub const GAS_FOR_SETUP_ASSET: Gas = Gas(100_000_000_000_000);
-/// Gas for calling `mint_asset` function on token factory contract.
+/// Gas for calling `mint_asset` function of token factory contract.
 pub const GAS_FOR_MINT_ASSET: Gas = Gas(30_000_000_000_000);
-/// Gas for calling `do_send_transfer` function on NEAR ibc contract.
-pub const GAS_FOR_DO_SEND_TRANSFER: Gas = Gas(150_000_000_000_000);
-/// Gas for the token contract creation.
-pub const GAS_FOR_TOKEN_CONTRACT_INIT: Gas = Gas(5_000_000_000_000);
-/// Gas for calling `mint` function on wrapped token contract.
-pub const GAS_FOR_TOKEN_CONTRACT_MINT: Gas = Gas(5_000_000_000_000);
-/// Gas for calling `burn` function on wrapped token contract.
-pub const GAS_FOR_TOKEN_CONTRACT_BURN: Gas = Gas(5_000_000_000_000);
-/// Initial balance for the token contract to cover storage deposit.
-pub const BALANCE_FOR_TOKEN_CONTRACT_INIT: Balance = 3_000_000_000_000_000_000_000_000;
-/// The minimum balance for calling `mint` on the token contract.
-pub const BALANCE_FOR_TOKEN_CONTRACT_MINT: Balance = 10_000_000_000_000_000_000_000;
+/// Gas for a complex function call.
+pub const GAS_FOR_COMPLEX_FUNCTION_CALL: Gas = Gas(150_000_000_000_000);
+/// Gas for a simple function call.
+pub const GAS_FOR_SIMPLE_FUNCTION_CALL: Gas = Gas(5_000_000_000_000);
 
-pub trait CheckStorageAndRefund {
-    /// Check the storage used in previously function call
-    /// and refund the unused attached deposit.
-    fn check_storage_and_refund(
-        &mut self,
-        caller: AccountId,
-        attached_deposit: U128,
-        previously_used_bytes: U64,
-    );
-}
+/// As the `deliver` function may cause storage changes, the caller needs to attach some NEAR
+/// to cover the storage cost. The minimum valid amount is 0.05 NEAR (for 5 kb storage).
+pub const MINIMUM_DEPOSIT_FOR_DELEVER_MSG: Balance = 50_000_000_000_000_000_000_000;
+/// Initial balance for the token contract to cover storage deposit.
+pub const INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT: Balance = 3_000_000_000_000_000_000_000_000;
+/// Initial balance for the channel escrow to cover storage deposit.
+pub const INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT: Balance = 3_000_000_000_000_000_000_000_000;
 
 /// Check the usage of storage of current account and refund the unused attached deposit.
 ///
@@ -142,6 +131,14 @@ pub fn get_grandparent_account_id() -> AccountId {
 /// to the current account id.
 pub fn get_token_factory_contract_id() -> AccountId {
     format!("tf.transfer.{}", env::current_account_id())
+        .parse()
+        .unwrap()
+}
+
+/// Get the escrow factory contract id by directly appending a certain suffix
+/// to the current account id.
+pub fn get_escrow_factory_contract_id() -> AccountId {
+    format!("ef.transfer.{}", env::current_account_id())
         .parse()
         .unwrap()
 }

@@ -1,5 +1,6 @@
 use super::{AccountIdConversion, TransferModule};
 use crate::context::NearIbcStoreHost;
+use core::str::FromStr;
 use ibc::{
     applications::transfer::{
         context::{BankKeeper, TokenTransferContext, TokenTransferKeeper, TokenTransferReader},
@@ -20,14 +21,10 @@ use ibc::{
     },
     Height,
 };
-use near_sdk::{
-    env,
-    json_types::U128,
-    log,
-    serde::{Deserialize, Serialize},
-    Promise,
+use near_sdk::{env, json_types::U128, log};
+use utils::interfaces::{
+    ext_channel_escrow, ext_process_transfer_request_callback, ext_token_factory,
 };
-use std::str::FromStr;
 
 impl BankKeeper for TransferModule {
     type AccountId = AccountIdConversion;
@@ -38,7 +35,31 @@ impl BankKeeper for TransferModule {
         to: &Self::AccountId,
         amt: &PrefixedCoin,
     ) -> Result<(), TokenTransferError> {
-        todo!()
+        let sender_id = from.0.to_string();
+        let receiver_id = to.0.to_string();
+        let base_denom = amt.denom.base_denom.to_string();
+        if receiver_id.ends_with(env::current_account_id().as_str()) {
+            ext_process_transfer_request_callback::ext(to.0.clone())
+                .with_attached_deposit(0)
+                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                .with_unused_gas_weight(0)
+                .apply_transfer_request(
+                    base_denom,
+                    from.0.clone(),
+                    U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
+                );
+        } else if sender_id.ends_with(env::current_account_id().as_str()) {
+            ext_channel_escrow::ext(from.0.clone())
+                .with_attached_deposit(1)
+                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                .with_unused_gas_weight(0)
+                .do_transfer(
+                    base_denom,
+                    to.0.clone(),
+                    U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
+                );
+        }
+        Ok(())
     }
 
     fn mint_coins(
@@ -52,27 +73,16 @@ impl BankKeeper for TransferModule {
             amt.denom.trace_path,
             amt.denom.base_denom
         );
-        #[derive(Serialize, Deserialize, Clone)]
-        #[serde(crate = "near_sdk::serde")]
-        struct Input {
-            pub trace_path: String,
-            pub base_denom: String,
-            pub token_owner: String,
-            pub amount: U128,
-        }
-        let args = Input {
-            trace_path: amt.denom.trace_path.to_string(),
-            base_denom: amt.denom.base_denom.to_string(),
-            token_owner: account.0.to_string(),
-            amount: U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
-        };
-        let args = near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_ASSET");
-        Promise::new(utils::get_token_factory_contract_id()).function_call(
-            "mint_asset".to_string(),
-            args,
-            env::attached_deposit(),
-            utils::GAS_FOR_MINT_ASSET,
-        );
+        ext_token_factory::ext(utils::get_token_factory_contract_id())
+            .with_attached_deposit(env::attached_deposit())
+            .with_static_gas(utils::GAS_FOR_MINT_ASSET)
+            .with_unused_gas_weight(0)
+            .mint_asset(
+                amt.denom.trace_path.to_string(),
+                amt.denom.base_denom.to_string(),
+                account.0.clone(),
+                U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
+            );
         Ok(())
     }
 
@@ -87,23 +97,15 @@ impl BankKeeper for TransferModule {
             amt.denom.trace_path,
             amt.denom.base_denom
         );
-        #[derive(Serialize, Deserialize, Clone)]
-        #[serde(crate = "near_sdk::serde")]
-        struct Input {
-            pub account_id: String,
-            pub amount: U128,
-        }
-        let args = Input {
-            account_id: account.0.to_string(),
-            amount: U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
-        };
-        let args = near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_ASSET");
-        Promise::new(env::predecessor_account_id()).function_call(
-            "burn".to_string(),
-            args,
-            0,
-            utils::GAS_FOR_TOKEN_CONTRACT_BURN,
-        );
+        ext_process_transfer_request_callback::ext(env::predecessor_account_id())
+            .with_attached_deposit(0)
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+            .with_unused_gas_weight(0)
+            .apply_transfer_request(
+                amt.denom.base_denom.to_string(),
+                account.0.clone(),
+                U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
+            );
         Ok(())
     }
 }
