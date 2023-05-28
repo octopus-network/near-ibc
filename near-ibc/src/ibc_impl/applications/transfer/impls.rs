@@ -75,7 +75,7 @@ impl BankKeeper for TransferModule {
         );
         ext_token_factory::ext(utils::get_token_factory_contract_id())
             .with_attached_deposit(env::attached_deposit())
-            .with_static_gas(utils::GAS_FOR_MINT_ASSET)
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 8)
             .with_unused_gas_weight(0)
             .mint_asset(
                 amt.denom.trace_path.to_string(),

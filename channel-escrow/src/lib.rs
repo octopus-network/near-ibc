@@ -1,3 +1,4 @@
+use ibc::applications::transfer::PORT_ID_STR;
 use near_contract_standards::fungible_token::core::ext_ft_core;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
@@ -28,7 +29,6 @@ pub enum StorageKey {
 pub struct FtOnTransferMsg {
     pub token_denom: String,
     pub receiver: String,
-    pub amount: U128,
 }
 
 #[near_bindgen]
@@ -70,7 +70,7 @@ impl Contract {
             self.token_contracts
                 .values()
                 .into_iter()
-                .any(|id| id == &sender_id),
+                .any(|id| env::predecessor_account_id().eq(id)),
             "ERR_UNREGISTERED_TOKEN_CONTRACT"
         );
         assert!(
@@ -85,10 +85,9 @@ impl Contract {
         );
         let msg = parse_result.unwrap();
         let current_account_id = env::current_account_id();
-        let (port_id, tail) = current_account_id.as_str().split_once(".").unwrap();
-        let (channel_id, _) = tail.split_once(".").unwrap();
+        let (channel_id, _) = current_account_id.as_str().split_once(".").unwrap();
         let transfer_request = Ics20TransferRequest {
-            port_on_a: port_id.to_string(),
+            port_on_a: PORT_ID_STR.to_string(),
             chan_on_a: channel_id.to_string(),
             token_trace_path: String::new(),
             token_denom: msg.token_denom,
@@ -118,7 +117,7 @@ impl Contract {
             "ERR_NO_PENDING_TRANSFER_REQUEST"
         );
         let req = self.pending_transfer_requests.get(&account_id).unwrap();
-        if req.amount == amount && req.token_denom.as_str() == base_denom {
+        if req.amount != amount || !req.token_denom.eq(base_denom) {
             panic!("ERR_PENDING_TRANSFER_REQUEST_NOT_MATCHED");
         }
         self.pending_transfer_requests.remove(&account_id);
@@ -129,7 +128,6 @@ utils::impl_storage_check_and_refund!(Contract);
 
 #[near_bindgen]
 impl ChannelEscrow for Contract {
-    #[payable]
     fn register_asset(&mut self, denom: String, token_contract: AccountId) {
         assert!(
             !self
@@ -139,12 +137,9 @@ impl ChannelEscrow for Contract {
                 .any(|id| id == &token_contract),
             "ERR_TOKEN_CONTRACT_ALREADY_REGISTERED"
         );
-        let used_bytes = env::storage_usage();
         self.token_contracts.insert(denom, token_contract);
-        utils::refund_deposit(used_bytes, env::attached_deposit());
     }
 
-    #[payable]
     fn do_transfer(&mut self, base_denom: String, receiver_id: AccountId, amount: U128) {
         self.assert_near_ibc_account();
         assert!(
@@ -181,7 +176,7 @@ impl ProcessTransferRequestCallback for Contract {
         let token_contract = self.token_contracts.get(&base_denom).unwrap();
         ext_ft_core::ext(token_contract.clone())
             .with_attached_deposit(1)
-            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 2)
             .with_unused_gas_weight(0)
             .ft_transfer(sender_id, amount.into(), None);
     }

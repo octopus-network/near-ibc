@@ -175,13 +175,13 @@ impl WrappedToken for Contract {
         let used_bytes = env::storage_usage();
         self.storage_deposit(Some(account_id.clone()), None);
         self.token.internal_deposit(&account_id, amount.into());
+        utils::refund_deposit(used_bytes, env::attached_deposit());
         FtMint {
             owner_id: &account_id,
             amount: &amount,
             memo: None,
         }
         .emit();
-        utils::refund_deposit(used_bytes, env::attached_deposit());
     }
 
     #[payable]

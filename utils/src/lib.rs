@@ -1,4 +1,5 @@
 use core::str::FromStr;
+use ibc::applications::transfer::PORT_ID_STR;
 use near_sdk::{
     env,
     json_types::{U128, U64},
@@ -10,12 +11,6 @@ pub mod interfaces;
 mod macros;
 pub mod types;
 
-/// Gas for calling `check_storage_and_refund` function.
-pub const GAS_FOR_CHECK_STORAGE_AND_REFUND: Gas = Gas(5_000_000_000_000);
-/// Gas for calling `setup_asset` function of token factory contract.
-pub const GAS_FOR_SETUP_ASSET: Gas = Gas(100_000_000_000_000);
-/// Gas for calling `mint_asset` function of token factory contract.
-pub const GAS_FOR_MINT_ASSET: Gas = Gas(30_000_000_000_000);
 /// Gas for a complex function call.
 pub const GAS_FOR_COMPLEX_FUNCTION_CALL: Gas = Gas(150_000_000_000_000);
 /// Gas for a simple function call.
@@ -25,7 +20,7 @@ pub const GAS_FOR_SIMPLE_FUNCTION_CALL: Gas = Gas(5_000_000_000_000);
 /// to cover the storage cost. The minimum valid amount is 0.05 NEAR (for 5 kb storage).
 pub const MINIMUM_DEPOSIT_FOR_DELEVER_MSG: Balance = 50_000_000_000_000_000_000_000;
 /// Initial balance for the token contract to cover storage deposit.
-pub const INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT: Balance = 3_000_000_000_000_000_000_000_000;
+pub const INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT: Balance = 3_500_000_000_000_000_000_000_000;
 /// Initial balance for the channel escrow to cover storage deposit.
 pub const INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT: Balance = 3_000_000_000_000_000_000_000_000;
 
@@ -55,7 +50,7 @@ pub fn refund_deposit(previously_used_bytes: u64, max_refundable_amount: u128) {
         "check_storage_and_refund".to_string(),
         args,
         0,
-        GAS_FOR_CHECK_STORAGE_AND_REFUND,
+        GAS_FOR_SIMPLE_FUNCTION_CALL,
     );
 }
 
@@ -130,7 +125,7 @@ pub fn get_grandparent_account_id() -> AccountId {
 /// Get the token factory contract id by directly appending a certain suffix
 /// to the current account id.
 pub fn get_token_factory_contract_id() -> AccountId {
-    format!("tf.transfer.{}", env::current_account_id())
+    format!("tf.{}.{}", PORT_ID_STR, env::current_account_id())
         .parse()
         .unwrap()
 }
@@ -138,7 +133,7 @@ pub fn get_token_factory_contract_id() -> AccountId {
 /// Get the escrow factory contract id by directly appending a certain suffix
 /// to the current account id.
 pub fn get_escrow_factory_contract_id() -> AccountId {
-    format!("ef.transfer.{}", env::current_account_id())
+    format!("ef.{}.{}", PORT_ID_STR, env::current_account_id())
         .parse()
         .unwrap()
 }

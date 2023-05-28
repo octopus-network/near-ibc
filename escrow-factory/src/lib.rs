@@ -41,6 +41,7 @@ impl Contract {
 
 #[near_bindgen]
 impl EscrowFactory for Contract {
+    #[payable]
     fn create_escrow(&mut self, channel_id: ChannelId) {
         utils::assert_ancestor_account();
         let used_bytes = env::storage_usage();
@@ -86,7 +87,7 @@ utils::impl_storage_check_and_refund!(Contract);
 /// Stores attached data into blob store and returns hash of it.
 /// Implemented to avoid loading the data into WASM for optimal gas usage.
 #[no_mangle]
-pub extern "C" fn store_wasm_of_escrow_contract() {
+pub extern "C" fn store_wasm_of_channel_escrow() {
     env::setup_panic_hook();
     let _contract: Contract = env::state_read().expect("ERR_CONTRACT_IS_NOT_INITIALIZED");
     assert_eq!(

@@ -27,7 +27,7 @@ use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     collections::LazyOption,
     env,
-    json_types::Base64VecU8,
+    json_types::{Base64VecU8, U128},
     log, near_bindgen,
     serde::{Deserialize, Serialize},
     serde_json,
@@ -318,6 +318,8 @@ impl Contract {
     }
 }
 
+utils::impl_storage_check_and_refund!(Contract);
+
 #[near_bindgen]
 impl TransferRequestHandler for Contract {
     fn process_transfer_request(&mut self, transfer_request: Ics20TransferRequest) {
@@ -355,7 +357,7 @@ impl TransferRequestHandler for Contract {
             );
             ext_process_transfer_request_callback::ext(env::predecessor_account_id())
                 .with_attached_deposit(0)
-                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
                 .with_unused_gas_weight(0)
                 .cancel_transfer_request(
                     transfer_request.token_denom,
@@ -397,7 +399,28 @@ impl TryInto<PrefixedCoin> for TransferringCoins {
     }
 }
 
-utils::impl_storage_check_and_refund!(Contract);
+/// Some sudo functions for testing.
+#[near_bindgen]
+impl Contract {
+    pub fn cancel_transfer_request_in_channel_escrow(
+        &mut self,
+        channel_id: String,
+        token_denom: String,
+        sender_id: AccountId,
+        amount: U128,
+    ) {
+        self.assert_governance();
+        let channel_escrow_id =
+            format!("{}.{}", channel_id, utils::get_escrow_factory_contract_id());
+        ext_process_transfer_request_callback::ext(
+            AccountId::from_str(channel_escrow_id.as_str()).unwrap(),
+        )
+        .with_attached_deposit(0)
+        .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
+        .with_unused_gas_weight(0)
+        .cancel_transfer_request(token_denom, sender_id, amount);
+    }
+}
 
 #[no_mangle]
 pub extern "C" fn remove_storage_keys() {
