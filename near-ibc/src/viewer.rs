@@ -1,37 +1,19 @@
+use crate::Contract;
 use crate::*;
-use crate::{ibc_impl::core::host::type_define::RawConsensusState, Contract};
 use ibc::{
     core::{
-        ics02_client::context::ClientReader,
-        ics03_connection::{
-            connection::{ConnectionEnd, IdentifiedConnectionEnd},
-            context::ConnectionReader,
-            error::ConnectionError,
-        },
+        ics03_connection::connection::{ConnectionEnd, IdentifiedConnectionEnd},
         ics04_channel::{
             channel::{ChannelEnd, IdentifiedChannelEnd},
             commitment::{AcknowledgementCommitment, PacketCommitment},
-            context::ChannelReader,
-            error::ChannelError,
-            packet::{Receipt, Sequence},
+            packet::Sequence,
         },
         ics23_commitment::commitment::CommitmentPrefix,
         ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
     },
     Height,
 };
-use ibc_proto::{
-    google::protobuf::Any,
-    ibc::core::{
-        channel::v1::{
-            PacketState, QueryChannelsRequest, QueryPacketCommitmentRequest,
-            QueryPacketCommitmentsRequest,
-        },
-        client::v1::IdentifiedClientState,
-    },
-    protobuf::Protobuf,
-};
-use near_sdk::json_types::U64;
+use ibc_proto::ibc::core::channel::v1::QueryChannelsRequest;
 
 pub trait Viewer {
     /// Get the latest height of the host chain.
@@ -92,6 +74,10 @@ pub trait Viewer {
     fn get_packet_acknowledgements(&self, port_id: PortId, channel_id: ChannelId) -> Vec<Sequence>;
     /// Get the commitment packet stored on this host.
     fn get_commitment_prefix(&self) -> CommitmentPrefix;
+    /// Get the heights that ibc events happened on.
+    fn get_ibc_events_heights(&self) -> Vec<u64>;
+    /// Get ibc events happened on the given height.
+    fn get_ibc_events_at(&self, height: u64) -> Vec<IbcEvent>;
 }
 
 #[near_bindgen]
@@ -195,24 +181,16 @@ impl Viewer for Contract {
         channel_id: ChannelId,
         sequences: Vec<Sequence>,
     ) -> Vec<Sequence> {
-        // let context = self.build_ibc_context();
-
-        // let near_port_id =
-
-        // sequences
-        //     .iter()
-        //     .filter(|&e| context.near_ibc_store.packet_receipt.contains_key((p)))
-        //     .collect()
-        todo!()
-
-        // sequences.iter().filter(|e|  )
-
-        // context.near_ibc_store
-        //     .packet_receipt
-        //     .get(&(port_id.as_bytes().into(), channel_id.as_bytes().into()))
-        //     .filter(|e|)
-        // context.get_packet_receipt(&port_id, &channel_id)
-        // context.get_unre(&port_id, &channel_id, seq).unwrap()
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        let stored_sequences = near_ibc_store
+            .packet_receipts
+            .get(&(port_id, channel_id))
+            .map_or_else(|| vec![], |receipts| receipts.keys());
+        sequences
+            .iter()
+            .filter(|sequence| !stored_sequences.contains(&Some(**sequence)))
+            .cloned()
+            .collect()
     }
 
     fn get_clients(&self) -> Vec<(ClientId, Vec<u8>)> {
@@ -376,5 +354,22 @@ impl Viewer for Contract {
     fn get_commitment_prefix(&self) -> CommitmentPrefix {
         CommitmentPrefix::try_from(DEFAULT_COMMITMENT_PREFIX.as_bytes().to_vec())
             .unwrap_or_default()
+    }
+
+    fn get_ibc_events_heights(&self) -> Vec<u64> {
+        self.ibc_events_history
+            .keys()
+            .iter()
+            .filter(|h| h.is_some())
+            .map(|h| h.unwrap())
+            .collect()
+    }
+
+    fn get_ibc_events_at(&self, height: u64) -> Vec<IbcEvent> {
+        let raw_events = self
+            .ibc_events_history
+            .get_value_by_key(&height)
+            .map_or_else(|| vec![], |events| events);
+        Vec::<IbcEvent>::try_from_slice(&raw_events).unwrap_or_else(|_| vec![])
     }
 }

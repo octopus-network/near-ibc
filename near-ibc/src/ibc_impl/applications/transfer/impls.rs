@@ -1,10 +1,11 @@
-use core::fmt::Debug;
-
+use super::{AccountIdConversion, TransferModule};
+use crate::context::NearIbcStoreHost;
+use core::str::FromStr;
 use ibc::{
     applications::transfer::{
         context::{BankKeeper, TokenTransferContext, TokenTransferKeeper, TokenTransferReader},
         error::TokenTransferError,
-        PrefixedCoin, PORT_ID_STR,
+        PrefixedCoin,
     },
     core::{
         ics02_client::{client_state::ClientState, consensus_state::ConsensusState},
@@ -18,13 +19,12 @@ use ibc::{
         },
         ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
     },
-    signer::Signer,
     Height,
 };
-
-use crate::context::NearIbcStoreHost;
-
-use super::{AccountIdConversion, TransferModule};
+use near_sdk::{env, json_types::U128, log};
+use utils::interfaces::{
+    ext_channel_escrow, ext_process_transfer_request_callback, ext_token_factory,
+};
 
 impl BankKeeper for TransferModule {
     type AccountId = AccountIdConversion;
@@ -35,7 +35,31 @@ impl BankKeeper for TransferModule {
         to: &Self::AccountId,
         amt: &PrefixedCoin,
     ) -> Result<(), TokenTransferError> {
-        todo!()
+        let sender_id = from.0.to_string();
+        let receiver_id = to.0.to_string();
+        let base_denom = amt.denom.base_denom.to_string();
+        if receiver_id.ends_with(env::current_account_id().as_str()) {
+            ext_process_transfer_request_callback::ext(to.0.clone())
+                .with_attached_deposit(0)
+                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                .with_unused_gas_weight(0)
+                .apply_transfer_request(
+                    base_denom,
+                    from.0.clone(),
+                    U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
+                );
+        } else if sender_id.ends_with(env::current_account_id().as_str()) {
+            ext_channel_escrow::ext(from.0.clone())
+                .with_attached_deposit(1)
+                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                .with_unused_gas_weight(0)
+                .do_transfer(
+                    base_denom,
+                    to.0.clone(),
+                    U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
+                );
+        }
+        Ok(())
     }
 
     fn mint_coins(
@@ -43,7 +67,23 @@ impl BankKeeper for TransferModule {
         account: &Self::AccountId,
         amt: &PrefixedCoin,
     ) -> Result<(), TokenTransferError> {
-        todo!()
+        log!(
+            "Minting coins for account {}, trace path {}, base denom {}",
+            account.0,
+            amt.denom.trace_path,
+            amt.denom.base_denom
+        );
+        ext_token_factory::ext(utils::get_token_factory_contract_id())
+            .with_attached_deposit(env::attached_deposit())
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 8)
+            .with_unused_gas_weight(0)
+            .mint_asset(
+                amt.denom.trace_path.to_string(),
+                amt.denom.base_denom.to_string(),
+                account.0.clone(),
+                U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
+            );
+        Ok(())
     }
 
     fn burn_coins(
@@ -51,7 +91,22 @@ impl BankKeeper for TransferModule {
         account: &Self::AccountId,
         amt: &PrefixedCoin,
     ) -> Result<(), TokenTransferError> {
-        todo!()
+        log!(
+            "Burning coins for account {}, trace path {}, base denom {}",
+            account.0,
+            amt.denom.trace_path,
+            amt.denom.base_denom
+        );
+        ext_process_transfer_request_callback::ext(env::predecessor_account_id())
+            .with_attached_deposit(0)
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+            .with_unused_gas_weight(0)
+            .apply_transfer_request(
+                amt.denom.base_denom.to_string(),
+                account.0.clone(),
+                U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
+            );
+        Ok(())
     }
 }
 
@@ -67,15 +122,25 @@ impl TokenTransferReader for TransferModule {
         port_id: &PortId,
         channel_id: &ChannelId,
     ) -> Result<<Self as TokenTransferReader>::AccountId, TokenTransferError> {
-        todo!()
+        let escrow_account = format!(
+            "{}.ef.{}.{}",
+            channel_id.as_str(),
+            port_id.as_str(),
+            env::current_account_id()
+        );
+        Ok(AccountIdConversion(
+            near_sdk::AccountId::from_str(escrow_account.as_str()).unwrap(),
+        ))
     }
 
     fn is_send_enabled(&self) -> bool {
-        todo!()
+        // TODO: check if this is correct
+        true
     }
 
     fn is_receive_enabled(&self) -> bool {
-        todo!()
+        // TODO: check if this is correct
+        true
     }
 }
 

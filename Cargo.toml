@@ -4,6 +4,7 @@ members = [
     "escrow-factory",
     "near-ibc",
     "token-factory",
+    "utils",
     "wrapped-token",
 ]
 

@@ -17,7 +17,7 @@ impl PortReader for NearIbcStore {
     fn lookup_module_by_port(&self, port_id: &PortId) -> Result<ModuleId, PortError> {
         match port_id.as_str() {
             TRANSFER_PORT_ID => ModuleId::from_str(TRANSFER_MODULE_ID)
-                .map_err(|e| PortError::ImplementationSpecific),
+                .map_err(|_| PortError::ImplementationSpecific),
             // _ => Err(ICS05Error::module_not_found(port_id.clone())),
             _ => Err(PortError::UnknownPort {
                 port_id: port_id.clone(),

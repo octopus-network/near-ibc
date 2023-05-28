@@ -96,6 +96,36 @@ where
     pub fn remove_by_key(&mut self, key: &K) -> Option<V> {
         self.value_map.remove(key)
     }
+    /// Set max length of the queue.
+    pub fn set_max_length(&mut self, max_length: u64) {
+        self.max_length = max_length;
+        while self.end_index - self.start_index + 1 > self.max_length {
+            self.pop_front();
+        }
+    }
+    /// Clear the queue.
+    pub fn clear(&mut self) {
+        for index in self.start_index..self.end_index + 1 {
+            if let Some(key) = self.index_map.get(&index) {
+                env::storage_remove(
+                    migration::get_storage_key_in_lookup_array(
+                        &StorageKey::IbcEventsHistoryKey,
+                        &key,
+                    )
+                    .as_slice(),
+                );
+                env::storage_remove(
+                    migration::get_storage_key_in_lookup_array(
+                        &StorageKey::IbcEventsHistoryIndex,
+                        &index,
+                    )
+                    .as_slice(),
+                );
+            }
+        }
+        self.start_index = 0;
+        self.end_index = 0;
+    }
 }
 
 /// Implement view functions for `IndexedLookupQueue`.
@@ -135,7 +165,7 @@ where
     /// Get the keys stored in the queue.
     pub fn keys(&self) -> Vec<Option<K>> {
         let mut keys = Vec::<Option<K>>::new();
-        for index in self.start_index..self.end_index {
+        for index in self.start_index..self.end_index + 1 {
             keys.push(self.index_map.get(&index).map(|k| k.clone()));
         }
         keys
@@ -143,7 +173,7 @@ where
     /// Get the values stored in the queue.
     pub fn values(&self) -> Vec<Option<V>> {
         let mut values = Vec::<Option<V>>::new();
-        for index in self.start_index..self.end_index {
+        for index in self.start_index..self.end_index + 1 {
             values.push(
                 self.index_map
                     .get(&index)

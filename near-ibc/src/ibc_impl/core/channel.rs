@@ -1,11 +1,5 @@
-use core::{str::FromStr, time::Duration};
-
-use crate::{
-    context::NearIbcStore,
-    ibc_impl::core::host::type_define::{NearConnectionId, StoreInNear},
-    indexed_lookup_queue::IndexedLookupQueue,
-    StorageKey,
-};
+use crate::{context::NearIbcStore, indexed_lookup_queue::IndexedLookupQueue, StorageKey};
+use core::time::Duration;
 use ibc::{
     core::{
         ics02_client::{
@@ -21,20 +15,12 @@ use ibc::{
             error::{ChannelError, PacketError},
             packet::{Receipt, Sequence},
         },
-        ics24_host::{
-            identifier::{ChannelId, ClientId, ConnectionId, PortId},
-            path::{
-                AcksPath, ChannelEndsPath, CommitmentsPath, ConnectionsPath, ReceiptsPath,
-                SeqAcksPath, SeqRecvsPath, SeqSendsPath,
-            },
-            Path,
-        },
+        ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
     },
     timestamp::Timestamp,
     Height,
 };
-use ibc_proto::protobuf::Protobuf;
-use near_sdk::{env::sha256, store::Vector};
+use near_sdk::store::Vector;
 use sha2::Digest;
 
 impl ChannelReader for NearIbcStore {
@@ -122,7 +108,6 @@ impl ChannelReader for NearIbcStore {
                 port_id: port_id.clone(),
                 channel_id: channel_id.clone(),
             })
-            .map(Into::into)
     }
 
     fn get_next_sequence_ack(
@@ -147,14 +132,20 @@ impl ChannelReader for NearIbcStore {
     ) -> Result<PacketCommitment, PacketError> {
         self.packet_commitments
             .get(&(port_id.clone(), channel_id.clone()))
-            .ok_or(PacketError::PacketCommitmentNotFound {
-                sequence: sequence.clone(),
-            })
-            .unwrap()
-            .get_value_by_key(sequence)
-            .ok_or(PacketError::PacketCommitmentNotFound {
-                sequence: sequence.clone(),
-            })
+            .map_or_else(
+                || {
+                    Err(PacketError::PacketCommitmentNotFound {
+                        sequence: sequence.clone(),
+                    })
+                },
+                |packet_commitments| {
+                    packet_commitments
+                        .get_value_by_key(sequence)
+                        .ok_or_else(|| PacketError::PacketCommitmentNotFound {
+                            sequence: sequence.clone(),
+                        })
+                },
+            )
     }
 
     fn get_packet_receipt(
@@ -165,14 +156,20 @@ impl ChannelReader for NearIbcStore {
     ) -> Result<Receipt, PacketError> {
         self.packet_receipts
             .get(&(port_id.clone(), channel_id.clone()))
-            .ok_or(PacketError::PacketReceiptNotFound {
-                sequence: sequence.clone(),
-            })
-            .unwrap()
-            .get_value_by_key(sequence)
-            .ok_or(PacketError::PacketReceiptNotFound {
-                sequence: sequence.clone(),
-            })
+            .map_or_else(
+                || {
+                    Err(PacketError::PacketReceiptNotFound {
+                        sequence: sequence.clone(),
+                    })
+                },
+                |packet_receipts| {
+                    packet_receipts.get_value_by_key(sequence).ok_or_else(|| {
+                        PacketError::PacketReceiptNotFound {
+                            sequence: sequence.clone(),
+                        }
+                    })
+                },
+            )
     }
 
     fn get_packet_acknowledgement(
@@ -183,14 +180,20 @@ impl ChannelReader for NearIbcStore {
     ) -> Result<AcknowledgementCommitment, PacketError> {
         self.packet_acknowledgements
             .get(&(port_id.clone(), channel_id.clone()))
-            .ok_or(PacketError::PacketAcknowledgementNotFound {
-                sequence: sequence.clone(),
-            })
-            .unwrap()
-            .get_value_by_key(sequence)
-            .ok_or(PacketError::PacketAcknowledgementNotFound {
-                sequence: sequence.clone(),
-            })
+            .map_or_else(
+                || {
+                    Err(PacketError::PacketAcknowledgementNotFound {
+                        sequence: sequence.clone(),
+                    })
+                },
+                |packet_acknowledgements| {
+                    packet_acknowledgements
+                        .get_value_by_key(sequence)
+                        .ok_or_else(|| PacketError::PacketAcknowledgementNotFound {
+                            sequence: sequence.clone(),
+                        })
+                },
+            )
     }
 
     /// A hashing function for packet commitments
@@ -200,7 +203,7 @@ impl ChannelReader for NearIbcStore {
 
     /// Returns the current height of the local chain.
     fn host_height(&self) -> Result<Height, ChannelError> {
-        ClientReader::host_height(self).map_err(|error| ChannelError::MissingHeight)
+        ClientReader::host_height(self).map_err(|_| ChannelError::MissingHeight)
     }
 
     /// Returns the `ConsensusState` of the host (local) chain at a specific height.
@@ -225,16 +228,22 @@ impl ChannelReader for NearIbcStore {
     ) -> Result<Timestamp, ChannelError> {
         self.client_processed_times
             .get(client_id)
-            .ok_or(ChannelError::ProcessedTimeNotFound {
-                client_id: client_id.clone(),
-                height: height.clone(),
-            })
-            .unwrap()
-            .get_value_by_key(height)
-            .ok_or(ChannelError::ProcessedTimeNotFound {
-                client_id: client_id.clone(),
-                height: height.clone(),
-            })
+            .map_or_else(
+                || {
+                    Err(ChannelError::ProcessedTimeNotFound {
+                        client_id: client_id.clone(),
+                        height: height.clone(),
+                    })
+                },
+                |processed_times| {
+                    processed_times.get_value_by_key(height).ok_or(
+                        ChannelError::ProcessedTimeNotFound {
+                            client_id: client_id.clone(),
+                            height: height.clone(),
+                        },
+                    )
+                },
+            )
             .and_then(|time| {
                 Timestamp::from_nanoseconds(time).map_err(|e| ChannelError::Other {
                     description: format!("Timestamp from_nanoseconds failed: {:?}", e).to_string(),
@@ -248,19 +257,22 @@ impl ChannelReader for NearIbcStore {
         client_id: &ClientId,
         height: &Height,
     ) -> Result<Height, ChannelError> {
-        self.client_processed_heights
-            .get(client_id)
-            .ok_or(ChannelError::ProcessedHeightNotFound {
-                client_id: client_id.clone(),
-                height: height.clone(),
-            })
-            .unwrap()
-            .get_value_by_key(height)
-            .ok_or(ChannelError::ProcessedHeightNotFound {
-                client_id: client_id.clone(),
-                height: height.clone(),
-            })
-            .map(|h| h.clone())
+        self.client_processed_heights.get(client_id).map_or_else(
+            || {
+                Err(ChannelError::ProcessedHeightNotFound {
+                    client_id: client_id.clone(),
+                    height: height.clone(),
+                })
+            },
+            |processed_heights| {
+                processed_heights.get_value_by_key(height).ok_or(
+                    ChannelError::ProcessedHeightNotFound {
+                        client_id: client_id.clone(),
+                        height: height.clone(),
+                    },
+                )
+            },
+        )
     }
 
     /// Returns a counter on the number of channel ids have been created thus far.

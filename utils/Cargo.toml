@@ -1,13 +1,12 @@
 [package]
-name = "wrapped-token"
+name = "utils"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 near-sdk = "4.1.0"
 near-contract-standards = "4.1.0"
 ibc = { version = "0.28.0", default-features = false, features = ["parity-scale-codec", "mocks-no-std", "serde", "borsh"]}
-utils = { path = "../utils" }

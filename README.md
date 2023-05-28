@@ -18,6 +18,24 @@ Our implementation of the `BankKeeper` trait uses sub-accounts mechanism of NEAR
 
 The root account will be deployed by the wasm of the `near-ibc` crate. It includes the whole implementation of IBC/TAO and application module `transfer` (ICS-20).
 
+The contract `near-ibc` will at least provide the following interfaces (functions):
+
+* Function `deliver`:
+  * Any account can call this function.
+  * This function is for relayers to deliver IBC packet to IBC/TAO implementation. It will perform full standard processes for IBC packet implemented by `ibc-rs` crate.
+* Function `setup_wrapped_token`:
+  * Only the governance account can call this function.
+  * This function will call `setup_asset` function of `token-factory` contract to create and initialize a wrapped token contract for a specific asset from a certain channel.
+* Function `setup_channel_escrow`:
+  * Only the governance account can call this function.
+  * This function will call `create_escrow` function of `escrow-factory` contract to create and initialize an escrow contract for a specific channel.
+* Function `register_asset_to_channel_escrow`:
+  * Only the governance account can call this function.
+  * This function will call `register_asset` function of `channel-escrow` contract to register a `token contract` and its `denom` as a whitelisted asset for a certain channel.
+* Function `process_transfer_request`:
+  * Only the sub-accounts of `near-ibc` account can call this function.
+  * This function will call the `send_transfer` function implemented in `ibc-rs` crate to update on-chain state and generate necessary IBC events for relayers to perform a cross-chain token transfer. (Refer to [Sub accounts for assets from other chains](#sub-accounts-for-assets-from-other-chains) and [Sub accounts for channel escrows](#sub-accounts-for-channel-escrows) for more details.)
+
 ### Sub account `transfer`
 
 Full account id: `transfer.<root account>`.
@@ -32,15 +50,14 @@ This account is for deploying token contracts for assets from other chains. The 
 
 The contract `token-factory` will at least provide the following interfaces (functions):
 
-* Function `mint_asset`:
-  * Only the root account can call this function.
-  * This function will be called in function `BankKeeper::mint_coins`, which is implemented by the `transfer` module.
-  * This function checks whether the sub-account for the asset corresponding to the `denomination` of the coin (passed by the caller) exists. If not, a new sub-account will be created and initialized automatically. Then, the `mint` function of the contract of the sub-account will be called automatically. (Also refer to [sub-accounts for assets from other chains](#sub-accounts-for-assets-from-other-chains).)
+* Function `setup_asset`:
+  * Only the ancestor accounts of current account can call this function. The original caller should be the governance account set in `near-ibc` contract.
+  * This function checks whether the sub-account for the asset corresponding to the `denomination` of the coin (passed by the caller) exists. If not, a new sub-account will be created and initialized automatically.
   * When it is necessary to create sub-account for a new asset, this function will also check for duplication of both `denomination` and `asset id` (refer to [sub-accounts for assets from other chains](#sub-accounts-for-assets-from-other-chains)) in order to avoid hash collisions. Besides, the mappings of `denomination` and `asset id` will also be stored in this contract.
-* Function `burn_asset`:
-  * Only the root account can call this function.
-  * This function will be called in function `BankKeeper::burn_coins`, which is implemented by the `transfer` module.
-  * This function will call the function `burn` of the contract of the sub-account corresponding to the `denomination` of the coin (passed by the caller) automatically. (Also refer to [sub-accounts for assets from other chains](#sub-accounts-for-assets-from-other-chains).)
+* Function `mint_asset`:
+  * Only the ancestor accounts of current account can call this function.
+  * This function will be called in function `BankKeeper::mint_coins`, which is implemented by the `transfer` module in `near-ibc` contract.
+  * This function will call the `mint` function of the contract of the sub-account automatically. (Also refer to [sub-accounts for assets from other chains](#sub-accounts-for-assets-from-other-chains).)
 * Necessary view functions for querying `denomination`s and `asset id`s.
 
 ### Sub accounts for assets from other chains
@@ -52,13 +69,21 @@ This account is for minting and burning cross-chain assets that are NOT native i
 The contract `wrapped-token` will at least provide the following interfaces (functions):
 
 * Function `mint`:
-  * Only the sub-account `token-factory` (the previous level of current account id) can call this function.
-  * This function will mint a specified amount of tokens owned by a specified account in current token contract.
-  * This function will generate a certain IBC event to inform relayer that a specified amount of coins of a cross-chain asset have been minted.
-* Function `burn`:
-  * Only the sub-account `token-factory` (the previous level of current account id) can call this function.
-  * This function will burn a specified amount of tokens owned by a specified account in current token contract.
-  * This function will generate a certain IBC event to inform relayer that a specified amount of coins of a cross-chain asset have been burned.
+  * Only the parent account of current account (the `token-factory` account) can call this function.
+  * This function will mint a given amount of tokens to a given account in current token contract.
+* Function `request_transfer`:
+  * Only the token holders of in this contract can call this function.
+  * If all checks passed, this function will lock the given amount of tokens from the caller account (internal transfer them to the current account) and generate a `pending transfer request` for the caller account. Then it will schedule a call of `process_transfer_request` function of `near-ibc` contract.
+* Function `apply_transfer_request`:
+  * Only the `near-ibc` contract account can call this function.
+  * If the given parameters matches the `pending transfer request` of the given user account, the `pending transfer request` will be applied and removed. The given amount of tokens will be internal burnt from the current account.
+* Function `cancel_transfer_request`:
+  * Only the `near-ibc` contract account can call this function.
+  * If the given parameters matches the `pending transfer request` of the given user account, the `pending transfer request` will be canceled and removed. The given amount of tokens will be unlocked (internal transferred from the current account to the caller account corresponding to the `pending transfer request`).
+
+The full process sequence of `request_transfer` is as the following:
+
+![Request transfer](/images/request_transfer.png)
 
 ### Sub account `escrow-factory`
 
@@ -69,8 +94,7 @@ This account is for deploying escrow contracts for assets native in NEAR protoco
 The contract `escrow-factory` will at least provide the following interfaces (functions):
 
 * Function `create_escrow`:
-  * Only the root account can call this function.
-  * This function is called in the `Module::on_chan_open_confirm` callback function when the channel creation process is complete.
+  * Only the ancestor accounts of current account can call this function.
   * This function will create a sub-account for a certain IBC channel if it does not already exist. Then deploy and initialize the escrow contract (implemented by crate `channel-escrow`) in the sub-account automatically.
 
 ### Sub accounts for channel escrows
@@ -81,10 +105,29 @@ This account is for receiving/locking NEP-141 assets that are native in NEAR pro
 
 The contract `channel-escrow` will at least provide the following interfaces (functions):
 
+* Function `register_asset`:
+  * Only the `near-ibc` contract account can call this function. The original caller should be the governance account set in `near-ibc` contract.
+  * This function stores the given `token contract` and its `denom` as a whitelisted asset.
 * Function `ft_on_transfer`:
-  * This function is for receiving assets (whose source chain is the NEAR protocol) from the NEAR protocol. It acts as a callback function that is called when the `ft_transfer_call` function of any NEP-141 contract is triggered.
-  * This function will generate a certain IBC event or call a certain function of contract `near-ibc` in root account to start the process of transferring NEAR native assets to other chains. **(To be determined)**
-* Function `transfer`:
-  * Only the root account can call this function.
-  * The `BankKeeper::send_coins` function, implemented by the `transfer` module, will call this function to transfer a specified amount of previously locked NEP-141 tokens to a specified receiver in the NEAR protocol.
-  * This function will generate a certain IBC event to inform relayer that a specified amount of previously locked NEP-141 tokens are transferred.
+  * This function is for receiving assets (whose source chain is the NEAR protocol) from the NEAR protocol. It acts as a callback function which will be triggered when a token transfer to this account happens by calling the `ft_transfer_call` function of any NEP-141 contract.
+  * Only the transfers from `registered token contracts` will be accepted.
+  * If all checks passed, this function will generate a `pending transfer request` for the sender account. Then it will schedule a call of `process_transfer_request` function of `near-ibc` contract.
+* Function `apply_transfer_request`:
+  * Only the `near-ibc` contract account can call this function.
+  * If the given parameters matches the `pending transfer request` of the given user account, the `pending transfer request` will be applied and removed.
+* Function `cancel_transfer_request`:
+  * Only the `near-ibc` contract account can call this function.
+  * If the given parameters matches the `pending transfer request` of the given user account, the `pending transfer request` will be canceled and removed. The given amount of tokens will be transferred back to the sender account corresponding to the `pending transfer request`.
+* Function `do_transfer`:
+  * Only the `near-ibc` contract account can call this function.
+  * The `BankKeeper::send_coins` function, implemented by the `transfer` module in `near-ibc` contract, will call this function to transfer a certain amount of previously locked NEP-141 tokens from current account to a specific receiver in the NEAR protocol.
+
+The full process sequence of `ft_on_transfer` is as the following:
+
+![Ft on transfer](/images/ft_on_transfer.png)
+
+## Supporting features
+
+Please refer to release notes for details.
+
+* v1.0.0 pre-release 1
