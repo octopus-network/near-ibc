@@ -48,6 +48,8 @@ pub mod events;
 pub mod ibc_impl;
 pub mod indexed_lookup_queue;
 pub mod migration;
+pub mod testnet_functions;
+pub mod types;
 pub mod viewer;
 
 pub const DEFAULT_COMMITMENT_PREFIX: &str = "ibc";
@@ -174,7 +176,8 @@ impl Contract {
     pub fn deliver(&mut self, messages: Vec<Any>) {
         assert!(
             env::attached_deposit() >= utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG,
-            "Need to attach at least 0.1 NEAR to cover the possible storage cost."
+            "Need to attach at least {} yocto NEAR to cover the possible storage cost.",
+            utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG
         );
         let used_bytes = env::storage_usage();
         // Deliver messages to `ibc-rs`

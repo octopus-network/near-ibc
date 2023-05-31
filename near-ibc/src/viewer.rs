@@ -1,5 +1,7 @@
-use crate::Contract;
+use crate::types::{Qualified, QueryHeight};
 use crate::*;
+use crate::{types::QueryPacketEventDataRequest, Contract};
+use ibc::events::{IbcEventType, WithBlockDataType};
 use ibc::{
     core::{
         ics03_connection::connection::{ConnectionEnd, IdentifiedConnectionEnd},
@@ -13,7 +15,6 @@ use ibc::{
     },
     Height,
 };
-use ibc_proto::ibc::core::channel::v1::QueryChannelsRequest;
 
 pub trait Viewer {
     /// Get the latest height of the host chain.
@@ -48,7 +49,7 @@ pub trait Viewer {
     /// Get all connections associated with the given client id.
     fn get_client_connections(&self, client_id: ClientId) -> Vec<ConnectionId>;
     /// Get the channel ends associated with the given query request.
-    fn get_channels(&self, request: QueryChannelsRequest) -> Vec<IdentifiedChannelEnd>;
+    fn get_channels(&self) -> Vec<IdentifiedChannelEnd>;
     /// Get the channel ends associated with the given connection id.
     fn get_connection_channels(&self, connection_id: ConnectionId) -> Vec<IdentifiedChannelEnd>;
     /// Get the packet commitment stored on this host.
@@ -74,6 +75,11 @@ pub trait Viewer {
     fn get_packet_acknowledgements(&self, port_id: PortId, channel_id: ChannelId) -> Vec<Sequence>;
     /// Get the commitment packet stored on this host.
     fn get_commitment_prefix(&self) -> CommitmentPrefix;
+    /// Get the packet events associated with the given query request.
+    fn get_packet_events(
+        &self,
+        request: QueryPacketEventDataRequest,
+    ) -> Vec<(Height, Vec<IbcEvent>)>;
     /// Get the heights that ibc events happened on.
     fn get_ibc_events_heights(&self) -> Vec<u64>;
     /// Get ibc events happened on the given height.
@@ -236,7 +242,7 @@ impl Viewer for Contract {
             )
     }
 
-    fn get_channels(&self, request: QueryChannelsRequest) -> Vec<IdentifiedChannelEnd> {
+    fn get_channels(&self) -> Vec<IdentifiedChannelEnd> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
             .channels
@@ -261,6 +267,7 @@ impl Viewer for Contract {
                 |channels| {
                     channels
                         .iter()
+                        .filter(|key| near_ibc_store.channels.contains_key(key))
                         .map(|(port_id, channel_id)| IdentifiedChannelEnd {
                             port_id: port_id.clone(),
                             channel_id: channel_id.clone(),
@@ -356,6 +363,55 @@ impl Viewer for Contract {
             .unwrap_or_default()
     }
 
+    fn get_packet_events(
+        &self,
+        request: QueryPacketEventDataRequest,
+    ) -> Vec<(Height, Vec<IbcEvent>)> {
+        let mut result: Vec<(Height, Vec<IbcEvent>)> = Vec::new();
+        let (target_height, need_to_search_in_range) = match &request.height {
+            Qualified::SmallerEqual(query_height) => match query_height {
+                QueryHeight::Latest => (self.ibc_events_history.latest_key(), true),
+                QueryHeight::Specific(height) => (Some(height.revision_height()), true),
+            },
+            Qualified::Equal(query_height) => match query_height {
+                QueryHeight::Latest => (self.ibc_events_history.latest_key(), false),
+                QueryHeight::Specific(height) => (Some(height.revision_height()), false),
+            },
+        };
+        if need_to_search_in_range {
+            if let Some(height) = target_height {
+                self.ibc_events_history
+                    .keys()
+                    .iter()
+                    .filter(|key| key.is_some())
+                    .map(|key| key.unwrap())
+                    .filter(|key| *key <= height)
+                    .for_each(|key| {
+                        gether_ibc_events_with_height(
+                            &mut result,
+                            key,
+                            self.ibc_events_history
+                                .get_value_by_key(&key)
+                                .map(|events| {
+                                    Vec::<IbcEvent>::try_from_slice(&events)
+                                        .unwrap_or_else(|_| vec![])
+                                })
+                                .unwrap_or_else(|| vec![]),
+                            &request,
+                        );
+                    });
+            }
+        } else {
+            let events = self
+                .ibc_events_history
+                .get_value_by_key(&target_height.unwrap())
+                .map_or_else(|| vec![], |events| events);
+            let ibc_events = Vec::<IbcEvent>::try_from_slice(&events).unwrap_or_else(|_| vec![]);
+            gether_ibc_events_with_height(&mut result, target_height.unwrap(), ibc_events, &request)
+        }
+        result
+    }
+
     fn get_ibc_events_heights(&self) -> Vec<u64> {
         self.ibc_events_history
             .keys()
@@ -372,4 +428,48 @@ impl Viewer for Contract {
             .map_or_else(|| vec![], |events| events);
         Vec::<IbcEvent>::try_from_slice(&raw_events).unwrap_or_else(|_| vec![])
     }
+}
+
+fn gether_ibc_events_with_height(
+    result: &mut Vec<(Height, Vec<IbcEvent>)>,
+    height: u64,
+    ibc_events: Vec<IbcEvent>,
+    request: &QueryPacketEventDataRequest,
+) {
+    let events = ibc_events
+        .iter()
+        .filter(|event| match request.event_id {
+            WithBlockDataType::CreateClient => event.event_type() == IbcEventType::CreateClient,
+            WithBlockDataType::UpdateClient => event.event_type() == IbcEventType::UpdateClient,
+            WithBlockDataType::SendPacket => event.event_type() == IbcEventType::SendPacket,
+            WithBlockDataType::WriteAck => event.event_type() == IbcEventType::WriteAck,
+        })
+        .filter(|event| match event {
+            IbcEvent::CreateClient(_) => true,
+            IbcEvent::UpdateClient(_) => true,
+            IbcEvent::ReceivePacket(receive_packet) => {
+                request.source_port_id.eq(receive_packet.src_port_id())
+                    && request
+                        .source_channel_id
+                        .eq(receive_packet.src_channel_id())
+                    && request.destination_port_id.eq(receive_packet.dst_port_id())
+                    && request
+                        .destination_channel_id
+                        .eq(receive_packet.dst_channel_id())
+                    && request.sequences.contains(&receive_packet.sequence())
+            }
+            IbcEvent::WriteAcknowledgement(write_ack) => {
+                request.source_port_id.eq(write_ack.src_port_id())
+                    && request.source_channel_id.eq(write_ack.src_channel_id())
+                    && request.destination_port_id.eq(write_ack.dst_port_id())
+                    && request
+                        .destination_channel_id
+                        .eq(write_ack.dst_channel_id())
+                    && request.sequences.contains(&write_ack.sequence())
+            }
+            _ => false,
+        })
+        .map(|event| event.clone())
+        .collect_vec();
+    result.push((Height::new(0, height).unwrap(), events));
 }

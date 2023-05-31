@@ -108,14 +108,14 @@ where
         for index in self.start_index..self.end_index + 1 {
             if let Some(key) = self.index_map.get(&index) {
                 env::storage_remove(
-                    migration::get_storage_key_in_lookup_array(
+                    migration::get_storage_key_of_lookup_map(
                         &StorageKey::IbcEventsHistoryKey,
                         &key,
                     )
                     .as_slice(),
                 );
                 env::storage_remove(
-                    migration::get_storage_key_in_lookup_array(
+                    migration::get_storage_key_of_lookup_map(
                         &StorageKey::IbcEventsHistoryIndex,
                         &index,
                     )
@@ -145,6 +145,10 @@ where
     ///
     pub fn max_length(&self) -> u64 {
         self.max_length
+    }
+    ///
+    pub fn latest_key(&self) -> Option<K> {
+        self.index_map.get(&self.end_index).map(|k| k.clone())
     }
     /// Get current length of the queue.
     pub fn len(&self) -> u64 {
