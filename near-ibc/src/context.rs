@@ -94,3 +94,60 @@ impl Debug for NearIbcStore {
         write!(f, "NearIbcStore {{ ... }}")
     }
 }
+
+impl NearIbcStore {
+    ///
+    pub fn remove_client(&mut self, client_id: &ClientId) {
+        if let Some(vector) = self.client_connections.get_mut(client_id) {
+            vector.clear();
+        }
+        self.client_connections.remove(client_id);
+        if let Some(queue) = self.client_processed_heights.get_mut(client_id) {
+            queue.clear();
+        }
+        self.client_processed_heights.remove(client_id);
+        if let Some(queue) = self.client_processed_times.get_mut(client_id) {
+            queue.clear();
+        }
+        self.client_processed_times.remove(client_id);
+        if let Some(queue) = self.consensus_states.get_mut(client_id) {
+            queue.clear();
+        }
+        self.consensus_states.remove(client_id);
+        self.client_states.remove(client_id);
+        self.client_types.remove(client_id);
+    }
+    ///
+    pub fn remove_connection(&mut self, connection_id: &ConnectionId) {
+        if let Some(vector) = self.connection_channels.get_mut(connection_id) {
+            vector.clear();
+        }
+        self.connection_channels.remove(connection_id);
+        self.connections.remove(connection_id);
+    }
+    ///
+    pub fn remove_channel(&mut self, channel_end: &(PortId, ChannelId)) {
+        if let Some(queue) = self.packet_receipts.get_mut(channel_end) {
+            queue.clear();
+        }
+        self.packet_receipts.remove(channel_end);
+        if let Some(queue) = self.packet_commitments.get_mut(channel_end) {
+            queue.clear();
+        }
+        self.packet_commitments.remove(channel_end);
+        if let Some(queue) = self.packet_acknowledgements.get_mut(channel_end) {
+            queue.clear();
+        }
+        self.packet_acknowledgements.remove(channel_end);
+        self.next_sequence_send.remove(channel_end);
+        self.next_sequence_recv.remove(channel_end);
+        self.next_sequence_ack.remove(channel_end);
+        self.channels.remove(channel_end);
+    }
+    ///
+    pub fn clear_counters(&mut self) {
+        self.client_ids_counter = 0;
+        self.connection_ids_counter = 0;
+        self.channel_ids_counter = 0;
+    }
+}

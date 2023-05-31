@@ -28,9 +28,6 @@ impl Contract {
     }
 }
 
-pub fn get_storage_key_in_lookup_array<T: BorshSerialize>(
-    prefix: &StorageKey,
-    index: &T,
-) -> Vec<u8> {
+pub fn get_storage_key_of_lookup_map<T: BorshSerialize>(prefix: &StorageKey, index: &T) -> Vec<u8> {
     [prefix.try_to_vec().unwrap(), index.try_to_vec().unwrap()].concat()
 }
