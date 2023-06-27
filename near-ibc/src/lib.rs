@@ -304,7 +304,7 @@ impl Contract {
     /// Register the given token contract for the given channel.
     ///
     /// Only the governance account can call this function.
-    pub fn register_asset_for_channel_escrow(
+    pub fn register_asset_for_channel(
         &mut self,
         channel_id: String,
         denom: String,

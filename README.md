@@ -29,7 +29,7 @@ The contract `near-ibc` will at least provide the following interfaces (function
 * Function `setup_channel_escrow`:
   * Only the governance account can call this function.
   * This function will call `create_escrow` function of `escrow-factory` contract to create and initialize an escrow contract for a specific channel.
-* Function `register_asset_to_channel_escrow`:
+* Function `register_asset_for_channel`:
   * Only the governance account can call this function.
   * This function will call `register_asset` function of `channel-escrow` contract to register a `token contract` and its `denom` as a whitelisted asset for a certain channel.
 * Function `process_transfer_request`:
@@ -81,10 +81,6 @@ The contract `wrapped-token` will at least provide the following interfaces (fun
   * Only the `near-ibc` contract account can call this function.
   * If the given parameters matches the `pending transfer request` of the given user account, the `pending transfer request` will be canceled and removed. The given amount of tokens will be unlocked (internal transferred from the current account to the caller account corresponding to the `pending transfer request`).
 
-The full process sequence of `request_transfer` is as the following:
-
-![Request transfer](/images/request_transfer.png)
-
 ### Sub account `escrow-factory`
 
 Full account id: `ef.transfer.<root account>`.
@@ -122,12 +118,26 @@ The contract `channel-escrow` will at least provide the following interfaces (fu
   * Only the `near-ibc` contract account can call this function.
   * The `BankKeeper::send_coins` function, implemented by the `transfer` module in `near-ibc` contract, will call this function to transfer a certain amount of previously locked NEP-141 tokens from current account to a specific receiver in the NEAR protocol.
 
-The full process sequence of `ft_on_transfer` is as the following:
+### General process of ICS20 implementation
 
-![Ft on transfer](/images/ft_on_transfer.png)
+#### Transfer asset from other chain to NEAR protocol
+
+![3-1](/images/near_ibc-Page-3-1.drawio.png)
+
+#### Redeem cross-chain asset from NEAR protocol back to the source chain
+
+![3-2](/images/near_ibc-Page-3-2.drawio.png)
+
+#### Transfer asset from NEAR protocol to other chains
+
+![4-1](/images/near_ibc-Page-4-1.drawio.png)
+
+#### Redeem cross-chain asset from other chains back to NEAR protocol
+
+![4-2](/images/near_ibc-Page-4-2.drawio.png)
 
 ## Supporting features
 
 Please refer to release notes for details.
 
-* v1.0.0 pre-release 1
+* [v1.0.0 pre-release 1](https://github.com/octopus-network/near-ibc/releases/tag/v1.0.0-pre.1)
