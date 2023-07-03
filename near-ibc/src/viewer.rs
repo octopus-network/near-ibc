@@ -1,7 +1,6 @@
 use crate::types::{Qualified, QueryHeight};
 use crate::*;
 use crate::{types::QueryPacketEventDataRequest, Contract};
-use ibc::events::{IbcEventType, WithBlockDataType};
 use ibc::{
     core::{
         ics03_connection::connection::{ConnectionEnd, IdentifiedConnectionEnd},
@@ -438,12 +437,7 @@ fn gether_ibc_events_with_height(
 ) {
     let events = ibc_events
         .iter()
-        .filter(|event| match request.event_id {
-            WithBlockDataType::CreateClient => event.event_type() == IbcEventType::CreateClient,
-            WithBlockDataType::UpdateClient => event.event_type() == IbcEventType::UpdateClient,
-            WithBlockDataType::SendPacket => event.event_type() == IbcEventType::SendPacket,
-            WithBlockDataType::WriteAck => event.event_type() == IbcEventType::WriteAck,
-        })
+        .filter(|event| request.event_type.eq(event.event_type()))
         .filter(|event| match event {
             IbcEvent::CreateClient(_) => true,
             IbcEvent::UpdateClient(_) => true,

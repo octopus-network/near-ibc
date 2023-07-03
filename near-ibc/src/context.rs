@@ -1,9 +1,8 @@
 use crate::{
     ibc_impl::{
         applications::transfer::TransferModule,
-        core::{
-            host::type_define::{IbcHostHeight, NearTimeStamp, RawClientState, RawConsensusState},
-            routing::{NearRouter, NearRouterBuilder},
+        core::host::type_define::{
+            IbcHostHeight, NearTimeStamp, RawClientState, RawConsensusState,
         },
     },
     indexed_lookup_queue::IndexedLookupQueue,
@@ -11,7 +10,6 @@ use crate::{
 };
 use core::fmt::{Debug, Formatter};
 use ibc::{
-    applications::transfer,
     core::{
         ics02_client::client_type::ClientType,
         ics03_connection::connection::ConnectionEnd,
@@ -21,7 +19,7 @@ use ibc::{
             packet::{Receipt, Sequence},
         },
         ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
-        ics26_routing::context::{ModuleId, RouterBuilder},
+        router::ModuleId,
     },
     Height,
 };
@@ -53,6 +51,8 @@ pub struct NearIbcStore {
         LookupMap<(PortId, ChannelId), IndexedLookupQueue<Sequence, AcknowledgementCommitment>>,
     pub packet_commitments:
         LookupMap<(PortId, ChannelId), IndexedLookupQueue<Sequence, PacketCommitment>>,
+    /// To support the mutable borrow of `Router` in `Router::get_route_mut`
+    pub transfer_module: TransferModule,
 }
 
 pub trait NearIbcStoreHost {
@@ -67,25 +67,6 @@ pub trait NearIbcStoreHost {
     fn set_near_ibc_store(store: &NearIbcStore) {
         let store = store.try_to_vec().unwrap();
         near_sdk::env::storage_write(b"ibc_store", &store);
-    }
-}
-
-pub struct NearRouterContext {
-    pub near_ibc_store: NearIbcStore,
-    pub router: NearRouter,
-}
-
-impl NearRouterContext {
-    pub fn new(store: NearIbcStore) -> Self {
-        let router = NearRouterBuilder::default()
-            .add_route(transfer::MODULE_ID_STR.parse().unwrap(), TransferModule()) // register transfer Module
-            .unwrap()
-            .build();
-
-        Self {
-            near_ibc_store: store,
-            router,
-        }
     }
 }
 

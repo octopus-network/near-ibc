@@ -3,7 +3,6 @@ use ibc::{
         ics04_channel::packet::Sequence,
         ics24_host::identifier::{ChannelId, PortId},
     },
-    events::WithBlockDataType,
     Height,
 };
 use near_sdk::serde::{Deserialize, Serialize};
@@ -25,7 +24,7 @@ pub enum Qualified<T> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct QueryPacketEventDataRequest {
-    pub event_id: WithBlockDataType,
+    pub event_type: String,
     pub source_channel_id: ChannelId,
     pub source_port_id: PortId,
     pub destination_channel_id: ChannelId,
