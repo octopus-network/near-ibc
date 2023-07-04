@@ -1,55 +1,98 @@
-use crate::{context::NearIbcStore, prelude::*};
-use core::fmt::{Debug, Formatter};
+use crate::{
+    collections::IndexedOrderedQueue, context::NearIbcStore, events::EventEmitter, prelude::*,
+    StorageKey,
+};
+use core::fmt::Debug;
 use ibc::{
     core::{
         events::IbcEvent,
-        ics02_client::{
-            client_state::ClientState, client_type::ClientType, consensus_state::ConsensusState,
-            error::ClientError,
-        },
+        ics02_client::{client_state::ClientState, consensus_state::ConsensusState},
         ics03_connection::{connection::ConnectionEnd, error::ConnectionError},
         ics04_channel::{
             channel::ChannelEnd,
             commitment::{AcknowledgementCommitment, PacketCommitment},
-            error::{ChannelError, PacketError},
             packet::{Receipt, Sequence},
         },
-        ics23_commitment::commitment::CommitmentPrefix,
-        ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
-        router::{Module, ModuleId, Router},
+        ics24_host::{
+            identifier::{ChannelId, ClientId, ConnectionId, PortId},
+            path::{
+                AckPath, ChannelEndPath, ClientConnectionPath, ClientConsensusStatePath,
+                ClientStatePath, CommitmentPath, ConnectionPath, ReceiptPath, SeqAckPath,
+                SeqRecvPath, SeqSendPath,
+            },
+        },
         timestamp::Timestamp,
         ContextError, ExecutionContext, ValidationContext,
     },
     Height,
 };
+use ibc_proto::protobuf::Protobuf;
 use near_sdk::{
-    borsh::maybestd::{borrow::Borrow, collections::BTreeMap, sync::Arc},
+    borsh::{self, BorshDeserialize, BorshSerialize},
     env, log,
+    store::{LookupMap, UnorderedSet},
 };
 
 impl ExecutionContext for NearIbcStore {
     fn store_client_state(
         &mut self,
-        client_state_path: ibc::core::ics24_host::path::ClientStatePath,
+        client_state_path: ClientStatePath,
         client_state: Box<dyn ClientState>,
     ) -> Result<(), ContextError> {
-        log!("store_client_state, client_state: {:?}", client_state);
+        log!(
+            "store_client_state - path: {}, client_state: {:?}",
+            client_state_path,
+            client_state
+        );
         let data = client_state.encode_vec();
         let key = client_state_path.to_string().into_bytes();
         env::storage_write(&key, &data);
+        //
+        self.client_id_set.insert(client_state_path.0.clone());
         Ok(())
     }
 
     fn store_consensus_state(
         &mut self,
-        consensus_state_path: ibc::core::ics24_host::path::ClientConsensusStatePath,
+        consensus_state_path: ClientConsensusStatePath,
         consensus_state: Box<dyn ConsensusState>,
     ) -> Result<(), ContextError> {
-        todo!()
+        log!(
+            "store_consensus_state - path: {}, consensus_state: {:?}",
+            consensus_state_path,
+            consensus_state
+        );
+        let data = consensus_state.encode_vec();
+        let key = consensus_state_path.to_string().into_bytes();
+        env::storage_write(&key, &data);
+        //
+        if !self
+            .client_consensus_state_height_sets
+            .contains_key(&consensus_state_path.client_id)
+        {
+            self.client_consensus_state_height_sets.insert(
+                consensus_state_path.client_id.clone(),
+                IndexedOrderedQueue::new(
+                    StorageKey::ClientConsensusStateHeightSet {
+                        client_id: consensus_state_path.client_id.clone(),
+                    },
+                    u64::MAX,
+                ),
+            );
+        }
+        self.client_consensus_state_height_sets
+            .get_mut(&consensus_state_path.client_id)
+            .map(|heights| {
+                heights.push_back(
+                    Height::new(consensus_state_path.epoch, consensus_state_path.height).unwrap(),
+                )
+            });
+        Ok(())
     }
 
     fn increase_client_counter(&mut self) {
-        todo!()
+        self.client_counter += 1;
+        log!("client_counter has increased to: {}", self.client_counter);
     }
 
     fn store_update_time(
@@ -58,7 +101,18 @@ impl ExecutionContext for NearIbcStore {
         height: Height,
         timestamp: Timestamp,
     ) -> Result<(), ContextError> {
-        todo!()
+        log!(
+            "store_update_time - client_id: {}, height: {}, timestamp: {}",
+            client_id,
+            height,
+            timestamp
+        );
+        self.client_processed_times
+            .get_mut(&client_id)
+            .and_then(|processed_times| {
+                Some(processed_times.push_back((height, timestamp.nanoseconds())))
+            });
+        Ok(())
     }
 
     fn store_update_height(
@@ -67,108 +121,297 @@ impl ExecutionContext for NearIbcStore {
         height: Height,
         host_height: Height,
     ) -> Result<(), ContextError> {
-        todo!()
+        log!(
+            "store_update_height - client_id: {}, height: {}, host_height: {}",
+            client_id,
+            height,
+            host_height
+        );
+        self.client_processed_heights
+            .get_mut(&client_id)
+            .and_then(|processed_heights| Some(processed_heights.push_back((height, host_height))));
+        Ok(())
     }
 
     fn store_connection(
         &mut self,
-        connection_path: &ibc::core::ics24_host::path::ConnectionPath,
+        connection_path: &ConnectionPath,
         connection_end: ConnectionEnd,
     ) -> Result<(), ContextError> {
-        todo!()
+        log!(
+            "store_connection: path: {}, connection_end: {:?}",
+            connection_path,
+            connection_end
+        );
+        let data = connection_end.encode_vec();
+        let key = connection_path.to_string().into_bytes();
+        env::storage_write(&key, &data);
+        //
+        self.connection_id_set.insert(connection_path.0.clone());
+        Ok(())
     }
 
     fn store_connection_to_client(
         &mut self,
-        client_connection_path: &ibc::core::ics24_host::path::ClientConnectionPath,
+        client_connection_path: &ClientConnectionPath,
         conn_id: ConnectionId,
     ) -> Result<(), ContextError> {
-        todo!()
+        log!(
+            "store_connection_to_client: path: {}, connection_id: {:?}",
+            client_connection_path,
+            conn_id
+        );
+        #[derive(BorshDeserialize, BorshSerialize, Debug)]
+        struct ConnectionIds(pub Vec<ConnectionId>);
+        let key = client_connection_path.to_string().into_bytes();
+        let data = if env::storage_has_key(&key) {
+            let mut connection_ids =
+                ConnectionIds::try_from_slice(&env::storage_read(&key).unwrap()).map_err(|e| {
+                    ContextError::ConnectionError(ConnectionError::Other {
+                        description: format!("ConnectionIds decoding error: {:?}", e),
+                    })
+                })?;
+            connection_ids.0.push(conn_id);
+            connection_ids.try_to_vec().map_err(|e| {
+                ContextError::ConnectionError(ConnectionError::Other {
+                    description: format!("ConnectionIds encoding error: {:?}", e),
+                })
+            })?
+        } else {
+            let connection_ids = ConnectionIds(vec![conn_id]);
+            connection_ids.try_to_vec().map_err(|e| {
+                ContextError::ConnectionError(ConnectionError::Other {
+                    description: format!("ConnectionIds encoding error: {:?}", e),
+                })
+            })?
+        };
+        env::storage_write(&key, &data);
+        Ok(())
     }
 
     fn increase_connection_counter(&mut self) {
-        todo!()
+        self.connection_counter += 1;
+        log!(
+            "connection_counter has increased to: {}",
+            self.connection_counter
+        );
     }
 
     fn store_packet_commitment(
         &mut self,
-        commitment_path: &ibc::core::ics24_host::path::CommitmentPath,
+        commitment_path: &CommitmentPath,
         commitment: PacketCommitment,
     ) -> Result<(), ContextError> {
-        todo!()
+        log!(
+            "store_packet_commitment: path: {}, commitment: {:?}",
+            commitment_path,
+            commitment
+        );
+        let data = commitment.into_vec();
+        let key = commitment_path.to_string().into_bytes();
+        env::storage_write(&key, &data);
+        //
+        record_packet_sequence(
+            &mut self.packet_commitment_sequence_sets,
+            StorageKey::PacketCommitmentSequenceSet {
+                port_id: commitment_path.port_id.clone(),
+                channel_id: commitment_path.channel_id.clone(),
+            },
+            &commitment_path.port_id,
+            &commitment_path.channel_id,
+            &commitment_path.sequence,
+        );
+        Ok(())
     }
 
     fn delete_packet_commitment(
         &mut self,
-        commitment_path: &ibc::core::ics24_host::path::CommitmentPath,
+        commitment_path: &CommitmentPath,
     ) -> Result<(), ContextError> {
-        todo!()
+        log!("delete_packet_commitment: path: {}", commitment_path);
+        let key = commitment_path.to_string().into_bytes();
+        env::storage_remove(&key);
+        //
+        self.packet_commitment_sequence_sets
+            .get_mut(&(
+                commitment_path.port_id.clone(),
+                commitment_path.channel_id.clone(),
+            ))
+            .map(|sequences| {
+                sequences.remove(&commitment_path.sequence);
+            });
+        Ok(())
     }
 
     fn store_packet_receipt(
         &mut self,
-        receipt_path: &ibc::core::ics24_host::path::ReceiptPath,
+        receipt_path: &ReceiptPath,
         receipt: Receipt,
     ) -> Result<(), ContextError> {
-        todo!()
+        log!(
+            "store_packet_receipt: path: {}, receipt: {:?}",
+            receipt_path,
+            receipt
+        );
+        let data = receipt.try_to_vec().unwrap();
+        let key = receipt_path.to_string().into_bytes();
+        env::storage_write(&key, &data);
+        //
+        record_packet_sequence(
+            &mut self.packet_receipt_sequence_sets,
+            StorageKey::PacketReceiptSequenceSet {
+                port_id: receipt_path.port_id.clone(),
+                channel_id: receipt_path.channel_id.clone(),
+            },
+            &receipt_path.port_id,
+            &receipt_path.channel_id,
+            &receipt_path.sequence,
+        );
+        Ok(())
     }
 
     fn store_packet_acknowledgement(
         &mut self,
-        ack_path: &ibc::core::ics24_host::path::AckPath,
+        ack_path: &AckPath,
         ack_commitment: AcknowledgementCommitment,
     ) -> Result<(), ContextError> {
-        todo!()
+        log!(
+            "store_packet_acknowledgement: path: {}, ack_commitment: {:?}",
+            ack_path,
+            ack_commitment
+        );
+        let data = ack_commitment.into_vec();
+        let key = ack_path.to_string().into_bytes();
+        env::storage_write(&key, &data);
+        //
+        record_packet_sequence(
+            &mut self.packet_acknowledgement_sequence_sets,
+            StorageKey::PacketAcknowledgementSequenceSet {
+                port_id: ack_path.port_id.clone(),
+                channel_id: ack_path.channel_id.clone(),
+            },
+            &ack_path.port_id,
+            &ack_path.channel_id,
+            &ack_path.sequence,
+        );
+        Ok(())
     }
 
-    fn delete_packet_acknowledgement(
-        &mut self,
-        ack_path: &ibc::core::ics24_host::path::AckPath,
-    ) -> Result<(), ContextError> {
-        todo!()
+    fn delete_packet_acknowledgement(&mut self, ack_path: &AckPath) -> Result<(), ContextError> {
+        log!("delete_packet_acknowledgement: path: {}", ack_path,);
+        let key = ack_path.to_string().into_bytes();
+        env::storage_remove(&key);
+        //
+        self.packet_acknowledgement_sequence_sets
+            .get_mut(&(ack_path.port_id.clone(), ack_path.channel_id.clone()))
+            .map(|sequences| {
+                sequences.remove(&ack_path.sequence);
+            });
+        Ok(())
     }
 
     fn store_channel(
         &mut self,
-        channel_end_path: &ibc::core::ics24_host::path::ChannelEndPath,
+        channel_end_path: &ChannelEndPath,
         channel_end: ChannelEnd,
     ) -> Result<(), ContextError> {
-        todo!()
+        log!(
+            "store_channel: path: {}, channel_end: {:?}",
+            channel_end_path,
+            channel_end
+        );
+        let data = channel_end.encode_vec();
+        let key = channel_end_path.to_string().into_bytes();
+        env::storage_write(&key, &data);
+        //
+        self.port_channel_id_set
+            .insert((channel_end_path.0.clone(), channel_end_path.1.clone()));
+        Ok(())
     }
 
     fn store_next_sequence_send(
         &mut self,
-        seq_send_path: &ibc::core::ics24_host::path::SeqSendPath,
+        seq_send_path: &SeqSendPath,
         seq: Sequence,
     ) -> Result<(), ContextError> {
-        todo!()
+        log!(
+            "store_next_sequence_send: path: {}, seq: {:?}",
+            seq_send_path,
+            seq
+        );
+        let data = seq.try_to_vec().unwrap();
+        let key = seq_send_path.to_string().into_bytes();
+        env::storage_write(&key, &data);
+        Ok(())
     }
 
     fn store_next_sequence_recv(
         &mut self,
-        seq_recv_path: &ibc::core::ics24_host::path::SeqRecvPath,
+        seq_recv_path: &SeqRecvPath,
         seq: Sequence,
     ) -> Result<(), ContextError> {
-        todo!()
+        log!(
+            "store_next_sequence_recv: path: {}, seq: {:?}",
+            seq_recv_path,
+            seq
+        );
+        let data = seq.try_to_vec().unwrap();
+        let key = seq_recv_path.to_string().into_bytes();
+        env::storage_write(&key, &data);
+        Ok(())
     }
 
     fn store_next_sequence_ack(
         &mut self,
-        seq_ack_path: &ibc::core::ics24_host::path::SeqAckPath,
+        seq_ack_path: &SeqAckPath,
         seq: Sequence,
     ) -> Result<(), ContextError> {
-        todo!()
+        log!(
+            "store_next_sequence_ack: path: {}, seq: {:?}",
+            seq_ack_path,
+            seq
+        );
+        let data = seq.try_to_vec().unwrap();
+        let key = seq_ack_path.to_string().into_bytes();
+        env::storage_write(&key, &data);
+        Ok(())
     }
 
     fn increase_channel_counter(&mut self) {
-        todo!()
+        self.channel_counter += 1;
+        log!("channel_counter has increased to: {}", self.channel_counter);
     }
 
     fn emit_ibc_event(&mut self, event: IbcEvent) {
-        todo!()
+        let height = self.host_height().unwrap();
+        if self.ibc_events_history.contains_key(&height) {
+            self.ibc_events_history
+                .get_value_by_key_mut(&height)
+                .map(|events| events.push(event.clone()));
+        } else {
+            self.ibc_events_history
+                .push_back((height, vec![event.clone()]));
+        }
+        event.emit();
     }
 
     fn log_message(&mut self, message: String) {
-        todo!()
+        log!("{}", message);
     }
+}
+
+fn record_packet_sequence(
+    lookup_sets: &mut LookupMap<(PortId, ChannelId), UnorderedSet<Sequence>>,
+    storage_key: StorageKey,
+    port_id: &PortId,
+    channel_id: &ChannelId,
+    sequence: &Sequence,
+) {
+    let key = (port_id.clone(), channel_id.clone());
+    if !lookup_sets.contains_key(&key) {
+        lookup_sets.insert(key.clone(), UnorderedSet::new(storage_key));
+    }
+    lookup_sets.get_mut(&key).map(|sequences| {
+        sequences.insert(sequence.clone());
+    });
 }

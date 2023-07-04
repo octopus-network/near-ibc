@@ -104,6 +104,10 @@ where
             self.pop_front();
         }
     }
+    /// Get value by key.
+    pub fn get_value_by_key_mut(&mut self, key: &K) -> Option<&mut V> {
+        self.value_map.get_mut(key)
+    }
     /// Remove a value from the queue by key but keep the index.
     pub fn remove_by_key(&mut self, key: &K) -> Option<V> {
         self.value_map.remove(key)
@@ -159,8 +163,8 @@ where
         self.max_length
     }
     ///
-    pub fn latest_key(&self) -> Option<K> {
-        self.index_map.get(&self.end_index).map(|k| k.clone())
+    pub fn latest_key(&self) -> Option<&K> {
+        self.index_map.get(&self.end_index)
     }
     /// Get current length of the queue.
     pub fn len(&self) -> u64 {
@@ -179,46 +183,46 @@ where
         }
     }
     /// Get the keys stored in the queue.
-    pub fn keys(&self) -> Vec<Option<K>> {
-        let mut keys = Vec::<Option<K>>::new();
+    pub fn keys(&self) -> Vec<Option<&K>> {
+        let mut keys = Vec::<Option<&K>>::new();
         for index in self.start_index..self.end_index + 1 {
-            keys.push(self.index_map.get(&index).map(|k| k.clone()));
+            keys.push(self.index_map.get(&index));
         }
         keys
     }
     /// Get the values stored in the queue.
-    pub fn values(&self) -> Vec<Option<V>> {
-        let mut values = Vec::<Option<V>>::new();
+    pub fn values(&self) -> Vec<Option<&V>> {
+        let mut values = Vec::<Option<&V>>::new();
         for index in self.start_index..self.end_index + 1 {
             values.push(
                 self.index_map
                     .get(&index)
-                    .map(|k| self.value_map.get(k).map(|v| v.clone()).unwrap()),
+                    .map(|k| self.value_map.get(k).map(|v| v).unwrap()),
             );
         }
         values
     }
     /// Get key by index.
-    pub fn get_key(&self, index: &u64) -> Option<K> {
-        self.index_map.get(index).map(|k| k.clone())
+    pub fn get_key(&self, index: &u64) -> Option<&K> {
+        self.index_map.get(index)
     }
     /// Get value by index.
-    pub fn get_value_by_index(&self, index: &u64) -> Option<V> {
+    pub fn get_value_by_index(&self, index: &u64) -> Option<&V> {
         self.index_map
             .get(index)
-            .map(|k| self.value_map.get(k).map(|v| v.clone()).unwrap())
+            .map(|k| self.value_map.get(k).map(|v| v).unwrap())
     }
     /// Get value by key.
-    pub fn get_value_by_key(&self, key: &K) -> Option<V> {
-        self.value_map.get(key).map(|v| v.clone())
+    pub fn get_value_by_key(&self, key: &K) -> Option<&V> {
+        self.value_map.get(key)
     }
     /// Get a slice of key-value pairs from the queue.
     pub fn get_slice_of(
         &self,
         start_index: &u64,
         quantity: Option<u64>,
-    ) -> Vec<(Option<K>, Option<V>)> {
-        let mut results = Vec::<(Option<K>, Option<V>)>::new();
+    ) -> Vec<(Option<&K>, Option<&V>)> {
+        let mut results = Vec::<(Option<&K>, Option<&V>)>::new();
         let start_index = match self.start_index > *start_index {
             true => self.start_index,
             false => *start_index,
@@ -267,10 +271,10 @@ where
         None
     }
     /// Get the value of the maximum key less than the given key.
-    pub fn get_previous_by_key(&self, key: &K) -> Option<V> {
+    pub fn get_previous_by_key(&self, key: &K) -> Option<&V> {
         if let Some(index) = self.get_index_of_key(key) {
             if index > self.start_index {
-                self.get_value_by_index(&(index - 1)).map(|v| v.clone())
+                self.get_value_by_index(&(index - 1))
             } else {
                 None
             }
@@ -289,14 +293,14 @@ where
                     end = mid - 1;
                 }
             }
-            result.map(|k| self.value_map.get(&k).map(|v| v.clone()).unwrap())
+            result.map(|k| self.value_map.get(&k).map(|v| v).unwrap())
         }
     }
     /// Get the value of the minimum key greater than the given key.
-    pub fn get_next_by_key(&self, key: &K) -> Option<V> {
+    pub fn get_next_by_key(&self, key: &K) -> Option<&V> {
         if let Some(index) = self.get_index_of_key(key) {
             if index < self.end_index {
-                self.get_value_by_index(&(index + 1)).map(|v| v.clone())
+                self.get_value_by_index(&(index + 1))
             } else {
                 None
             }
@@ -315,7 +319,7 @@ where
                     start = mid + 1;
                 }
             }
-            result.map(|k| self.value_map.get(&k).map(|v| v.clone()).unwrap())
+            result.map(|k| self.value_map.get(&k).map(|v| v).unwrap())
         }
     }
 }

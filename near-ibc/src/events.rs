@@ -7,7 +7,7 @@ use near_sdk::{env, log};
 const EVENT_STANDARD: &str = "near-ibc";
 const EVENT_STANDARD_VERSION: &str = "1.0.0";
 
-pub trait EventEmit {
+pub trait EventEmitter {
     fn emit(&self)
     where
         Self: Sized + Serialize;
@@ -37,7 +37,7 @@ pub(crate) fn emit_event<T: ?Sized + Serialize>(data: &T) {
     log!(format!("EVENT_JSON:{}", result.to_string()));
 }
 
-impl EventEmit for IbcEvent {
+impl EventEmitter for IbcEvent {
     fn emit(&self)
     where
         Self: Sized + Serialize,

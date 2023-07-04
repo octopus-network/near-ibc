@@ -18,7 +18,7 @@ use ibc::{
             identifier::{ClientId, ConnectionId},
             path::{
                 AckPath, ChannelEndPath, ClientConsensusStatePath, ClientStatePath, CommitmentPath,
-                ConnectionPath, Path, ReceiptPath, SeqAckPath, SeqRecvPath, SeqSendPath,
+                ConnectionPath, ReceiptPath, SeqAckPath, SeqRecvPath, SeqSendPath,
             },
         },
         timestamp::Timestamp,
@@ -26,7 +26,13 @@ use ibc::{
     },
     Height, Signer,
 };
-use ibc_proto::{google::protobuf::Any, protobuf::Protobuf};
+use ibc_proto::{
+    google::protobuf::Any,
+    ibc::core::{
+        channel::v1::Channel as RawChannelEnd, connection::v1::ConnectionEnd as RawConnectionEnd,
+    },
+    protobuf::Protobuf,
+};
 use near_sdk::{borsh::BorshDeserialize, env, AccountId};
 
 /// Constants for commitment prefix generation.
@@ -96,34 +102,16 @@ impl ValidationContext for NearIbcStore {
         client_id: &ClientId,
         height: &Height,
     ) -> Result<Option<Box<dyn ConsensusState>>, ContextError> {
-        if let Some(consensus_state_keys) = self.cached_consensus_state_keys.get(client_id) {
-            let consensus_state_key = consensus_state_keys.get_next_by_key(height);
-            if let Some(consensus_state_key) = consensus_state_key {
-                let path = Path::from_str(&consensus_state_key).map_err(|e| {
-                    ContextError::ClientError(ClientError::ClientSpecific {
-                        description: format!(
-                            "Invalid storage key in cached consensus state keys: {:?}",
-                            e
-                        )
-                        .to_string(),
-                    })
-                })?;
-                match path {
-                    Path::ClientConsensusState(client_cons_state_path) => self
-                        .consensus_state(&client_cons_state_path)
-                        .map(|cs| Some(cs)),
-                    _ => Err(ContextError::ClientError(ClientError::ClientSpecific {
-                        description: "Invalid path in cached consensus state keys.".to_string(),
-                    })),
-                }
-            } else {
-                Ok(None)
-            }
+        if let Some(consensus_state_keys) = self.client_consensus_state_height_sets.get(client_id) {
+            consensus_state_keys
+                .get_next_by_key(height)
+                .map(|next_height| {
+                    self.consensus_state(&ClientConsensusStatePath::new(client_id, next_height))
+                })
+                .map_or_else(|| Ok(None), |cs| Ok(Some(cs.unwrap())))
         } else {
             Err(ContextError::ClientError(
-                ClientError::ClientStateNotFound {
-                    client_id: client_id.clone(),
-                },
+                ClientError::MissingRawConsensusState,
             ))
         }
     }
@@ -133,34 +121,16 @@ impl ValidationContext for NearIbcStore {
         client_id: &ClientId,
         height: &Height,
     ) -> Result<Option<Box<dyn ConsensusState>>, ContextError> {
-        if let Some(consensus_state_keys) = self.cached_consensus_state_keys.get(client_id) {
-            let consensus_state_key = consensus_state_keys.get_previous_by_key(height);
-            if let Some(consensus_state_key) = consensus_state_key {
-                let path = Path::from_str(&consensus_state_key).map_err(|e| {
-                    ContextError::ClientError(ClientError::ClientSpecific {
-                        description: format!(
-                            "Invalid storage key in cached consensus state keys: {:?}",
-                            e
-                        )
-                        .to_string(),
-                    })
-                })?;
-                match path {
-                    Path::ClientConsensusState(client_cons_state_path) => self
-                        .consensus_state(&client_cons_state_path)
-                        .map(|cs| Some(cs)),
-                    _ => Err(ContextError::ClientError(ClientError::ClientSpecific {
-                        description: "Invalid path in cached consensus state keys.".to_string(),
-                    })),
-                }
-            } else {
-                Ok(None)
-            }
+        if let Some(consensus_state_keys) = self.client_consensus_state_height_sets.get(client_id) {
+            consensus_state_keys
+                .get_previous_by_key(height)
+                .map(|next_height| {
+                    self.consensus_state(&ClientConsensusStatePath::new(client_id, next_height))
+                })
+                .map_or_else(|| Ok(None), |cs| Ok(Some(cs.unwrap())))
         } else {
             Err(ContextError::ClientError(
-                ClientError::ClientStateNotFound {
-                    client_id: client_id.clone(),
-                },
+                ClientError::MissingRawConsensusState,
             ))
         }
     }
@@ -185,7 +155,7 @@ impl ValidationContext for NearIbcStore {
     }
 
     fn client_counter(&self) -> Result<u64, ContextError> {
-        Ok(self.client_ids_counter)
+        Ok(self.client_counter)
     }
 
     fn connection_end(&self, conn_id: &ConnectionId) -> Result<ConnectionEnd, ContextError> {
@@ -193,8 +163,8 @@ impl ValidationContext for NearIbcStore {
         let connection_end_key = path.to_string().into_bytes();
         match env::storage_read(&connection_end_key) {
             Some(data) => {
-                let result =
-                    ConnectionEnd::try_from_slice(&data).map_err(|e| ClientError::Other {
+                let result: ConnectionEnd = Protobuf::<RawConnectionEnd>::decode_vec(&data)
+                    .map_err(|e| ClientError::Other {
                         description: format!("Decode ConnectionEnd failed: {:?}", e).to_string(),
                     })?;
                 Ok(result)
@@ -229,16 +199,19 @@ impl ValidationContext for NearIbcStore {
     }
 
     fn connection_counter(&self) -> Result<u64, ContextError> {
-        Ok(self.connection_ids_counter)
+        Ok(self.connection_counter)
     }
 
     fn channel_end(&self, channel_end_path: &ChannelEndPath) -> Result<ChannelEnd, ContextError> {
         let channel_end_key = channel_end_path.to_string().into_bytes();
         match env::storage_read(&channel_end_key) {
             Some(data) => {
-                let result = ChannelEnd::try_from_slice(&data).map_err(|e| ClientError::Other {
-                    description: format!("Decode ChannelEnd failed: {:?}", e).to_string(),
-                })?;
+                let result: ChannelEnd =
+                    Protobuf::<RawChannelEnd>::decode_vec(&data).map_err(|e| {
+                        ClientError::Other {
+                            description: format!("Decode ChannelEnd failed: {:?}", e).to_string(),
+                        }
+                    })?;
                 Ok(result)
             }
             None => Err(ContextError::ChannelError(ChannelError::ChannelNotFound {
@@ -308,13 +281,7 @@ impl ValidationContext for NearIbcStore {
     ) -> Result<PacketCommitment, ContextError> {
         let commitment_key = commitment_path.to_string().into_bytes();
         match env::storage_read(&commitment_key) {
-            Some(data) => {
-                let result =
-                    PacketCommitment::try_from_slice(&data).map_err(|e| ClientError::Other {
-                        description: format!("Decode PacketCommitment failed: {:?}", e).to_string(),
-                    })?;
-                Ok(result)
-            }
+            Some(data) => Ok(PacketCommitment::from(data)),
             None => Err(ContextError::PacketError(
                 PacketError::PacketCommitmentNotFound {
                     sequence: commitment_path.sequence,
@@ -346,15 +313,7 @@ impl ValidationContext for NearIbcStore {
     ) -> Result<AcknowledgementCommitment, ContextError> {
         let ack_key = ack_path.to_string().into_bytes();
         match env::storage_read(&ack_key) {
-            Some(data) => {
-                let result = AcknowledgementCommitment::try_from_slice(&data).map_err(|e| {
-                    ClientError::Other {
-                        description: format!("Decode AcknowledgementCommitment failed: {:?}", e)
-                            .to_string(),
-                    }
-                })?;
-                Ok(result)
-            }
+            Some(data) => Ok(AcknowledgementCommitment::from(data)),
             None => Err(ContextError::PacketError(
                 PacketError::PacketAcknowledgementNotFound {
                     sequence: ack_path.sequence,
@@ -371,7 +330,7 @@ impl ValidationContext for NearIbcStore {
         self.client_processed_times
             .get(client_id)
             .and_then(|processed_times| processed_times.get_value_by_key(height))
-            .map(|ts| Timestamp::from_nanoseconds(ts).unwrap())
+            .map(|ts| Timestamp::from_nanoseconds(*ts).unwrap())
             .ok_or_else(|| {
                 ContextError::ClientError(ClientError::ClientStateNotFound {
                     client_id: client_id.clone(),
@@ -387,6 +346,7 @@ impl ValidationContext for NearIbcStore {
         self.client_processed_heights
             .get(client_id)
             .and_then(|processed_heights| processed_heights.get_value_by_key(height))
+            .map(|height: &Height| height.clone())
             .ok_or_else(|| {
                 ContextError::ClientError(ClientError::ClientStateNotFound {
                     client_id: client_id.clone(),
@@ -395,7 +355,7 @@ impl ValidationContext for NearIbcStore {
     }
 
     fn channel_counter(&self) -> Result<u64, ContextError> {
-        Ok(self.channel_ids_counter)
+        Ok(self.channel_counter)
     }
 
     fn max_expected_time_per_block(&self) -> Duration {

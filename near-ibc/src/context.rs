@@ -1,8 +1,5 @@
 use crate::{
-    ibc_impl::core::host::type_define::{
-        IbcHostHeight, NearTimeStamp, RawClientState, RawConsensusState,
-    },
-    indexed_lookup_queue::IndexedLookupQueue,
+    collections::{IndexedLookupQueue, IndexedOrderedQueue},
     module_holder::ModuleHolder,
     prelude::*,
     StorageKey,
@@ -10,53 +7,56 @@ use crate::{
 use core::fmt::{Debug, Formatter};
 use ibc::{
     core::{
-        ics02_client::client_type::ClientType,
-        ics03_connection::connection::ConnectionEnd,
-        ics04_channel::{
-            channel::ChannelEnd,
-            commitment::{AcknowledgementCommitment, PacketCommitment},
-            packet::{Receipt, Sequence},
+        events::IbcEvent,
+        ics04_channel::packet::Sequence,
+        ics24_host::{
+            identifier::{ChannelId, ClientId, ConnectionId, PortId},
+            path::{
+                AckPath, ClientConnectionPath, ClientConsensusStatePath, CommitmentPath,
+                ConnectionPath, ReceiptPath, SeqAckPath, SeqRecvPath, SeqSendPath,
+            },
         },
-        ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
         router::ModuleId,
     },
     Height,
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    store::{LookupMap, UnorderedMap, UnorderedSet, Vector},
+    env,
+    store::{LookupMap, UnorderedSet},
 };
+
+type NearTimeStamp = u64;
+type HostHeight = Height;
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct NearIbcStore {
-    pub client_types: LookupMap<ClientId, ClientType>,
-    pub client_states: UnorderedMap<ClientId, RawClientState>,
-    pub consensus_states: LookupMap<ClientId, IndexedLookupQueue<Height, RawConsensusState>>,
-    pub client_processed_times: LookupMap<ClientId, IndexedLookupQueue<Height, NearTimeStamp>>,
-    pub client_processed_heights: LookupMap<ClientId, IndexedLookupQueue<Height, IbcHostHeight>>,
-    pub client_ids_counter: u64,
-    pub client_connections: LookupMap<ClientId, Vector<ConnectionId>>,
-    pub connections: UnorderedMap<ConnectionId, ConnectionEnd>,
-    pub connection_ids_counter: u64,
-    pub port_to_module: LookupMap<PortId, ModuleId>,
-    pub connection_channels: LookupMap<ConnectionId, Vector<(PortId, ChannelId)>>,
-    pub channel_ids_counter: u64,
-    pub channels: UnorderedMap<(PortId, ChannelId), ChannelEnd>,
-    pub next_sequence_send: LookupMap<(PortId, ChannelId), Sequence>,
-    pub next_sequence_recv: LookupMap<(PortId, ChannelId), Sequence>,
-    pub next_sequence_ack: LookupMap<(PortId, ChannelId), Sequence>,
-    pub packet_receipts: LookupMap<(PortId, ChannelId), IndexedLookupQueue<Sequence, Receipt>>,
-    pub packet_acknowledgements:
-        LookupMap<(PortId, ChannelId), IndexedLookupQueue<Sequence, AcknowledgementCommitment>>,
-    pub packet_commitments:
-        LookupMap<(PortId, ChannelId), IndexedLookupQueue<Sequence, PacketCommitment>>,
     /// To support the mutable borrow in `Router::get_route_mut`.
     pub module_holder: ModuleHolder,
+    pub port_to_module: LookupMap<PortId, ModuleId>,
     /// The client ids of the clients.
-    pub client_ids: UnorderedSet<ClientId>,
-    /// The storage keys of the consensus states of the clients.
-    /// The value in this queue is the storage key (in string format) of the consensus state.
-    pub cached_consensus_state_keys: LookupMap<ClientId, IndexedLookupQueue<Height, String>>,
+    pub client_id_set: UnorderedSet<ClientId>,
+    pub client_counter: u64,
+    pub client_processed_times: LookupMap<ClientId, IndexedLookupQueue<Height, NearTimeStamp>>,
+    pub client_processed_heights: LookupMap<ClientId, IndexedLookupQueue<Height, HostHeight>>,
+    /// This collection contains the heights corresponding to all consensus states of
+    /// all clients stored in the contract.
+    pub client_consensus_state_height_sets: LookupMap<ClientId, IndexedOrderedQueue<Height>>,
+    /// The connection ids of the connections.
+    pub connection_id_set: UnorderedSet<ConnectionId>,
+    pub connection_counter: u64,
+    /// The port and channel id tuples of the channels.
+    pub port_channel_id_set: UnorderedSet<(PortId, ChannelId)>,
+    pub channel_counter: u64,
+    /// The sequence numbers of the packet commitments.
+    pub packet_commitment_sequence_sets: LookupMap<(PortId, ChannelId), UnorderedSet<Sequence>>,
+    /// The sequence numbers of the packet receipts.
+    pub packet_receipt_sequence_sets: LookupMap<(PortId, ChannelId), UnorderedSet<Sequence>>,
+    /// The sequence numbers of the packet acknowledgements.
+    pub packet_acknowledgement_sequence_sets:
+        LookupMap<(PortId, ChannelId), UnorderedSet<Sequence>>,
+    /// The history of IBC events.
+    pub ibc_events_history: IndexedLookupQueue<Height, Vec<IbcEvent>>,
 }
 
 pub trait NearIbcStoreHost {
@@ -82,11 +82,37 @@ impl Debug for NearIbcStore {
 
 impl NearIbcStore {
     ///
-    pub fn remove_client(&mut self, client_id: &ClientId) {
-        if let Some(vector) = self.client_connections.get_mut(client_id) {
-            vector.clear();
+    pub fn new() -> Self {
+        Self {
+            module_holder: ModuleHolder::new(),
+            port_to_module: LookupMap::new(StorageKey::PortToModule),
+            client_id_set: UnorderedSet::new(StorageKey::ClientIdSet),
+            client_counter: 0,
+            client_processed_times: LookupMap::new(StorageKey::ClientProcessedTimes),
+            client_processed_heights: LookupMap::new(StorageKey::ClientProcessedHeights),
+            client_consensus_state_height_sets: LookupMap::new(
+                StorageKey::ClientConsensusStateHeightSets,
+            ),
+            connection_id_set: UnorderedSet::new(StorageKey::ConnectionIdSet),
+            connection_counter: 0,
+            port_channel_id_set: UnorderedSet::new(StorageKey::PortChannelIdSet),
+            channel_counter: 0,
+            packet_commitment_sequence_sets: LookupMap::new(
+                StorageKey::PacketCommitmentSequenceSets,
+            ),
+            packet_receipt_sequence_sets: LookupMap::new(StorageKey::PacketReceiptSequenceSets),
+            packet_acknowledgement_sequence_sets: LookupMap::new(
+                StorageKey::PacketAcknowledgementSequenceSets,
+            ),
+            ibc_events_history: IndexedLookupQueue::new(
+                StorageKey::IbcEventsHistoryIndexMap,
+                StorageKey::IbcEventsHistoryValueMap,
+                u64::MAX,
+            ),
         }
-        self.client_connections.remove(client_id);
+    }
+    ///
+    pub fn remove_client(&mut self, client_id: &ClientId) {
         if let Some(queue) = self.client_processed_heights.get_mut(client_id) {
             queue.clear();
         }
@@ -95,44 +121,92 @@ impl NearIbcStore {
             queue.clear();
         }
         self.client_processed_times.remove(client_id);
-        if let Some(queue) = self.consensus_states.get_mut(client_id) {
-            queue.clear();
-        }
-        self.consensus_states.remove(client_id);
-        self.client_states.remove(client_id);
-        self.client_types.remove(client_id);
+        env::storage_remove(
+            &ClientConnectionPath::new(client_id)
+                .to_string()
+                .into_bytes(),
+        );
+        self.client_consensus_state_height_sets
+            .get(client_id)
+            .map(|heights| {
+                heights.keys().iter().for_each(|height| {
+                    height.map(|height| {
+                        env::storage_remove(
+                            &ClientConsensusStatePath::new(client_id, height)
+                                .to_string()
+                                .into_bytes(),
+                        )
+                    });
+                })
+            });
+        self.client_consensus_state_height_sets.remove(client_id);
+        self.client_id_set.remove(client_id);
     }
     ///
     pub fn remove_connection(&mut self, connection_id: &ConnectionId) {
-        if let Some(vector) = self.connection_channels.get_mut(connection_id) {
-            vector.clear();
-        }
-        self.connection_channels.remove(connection_id);
-        self.connections.remove(connection_id);
+        env::storage_remove(&ConnectionPath::new(&connection_id).to_string().into_bytes());
+        self.connection_id_set.remove(connection_id);
     }
     ///
-    pub fn remove_channel(&mut self, channel_end: &(PortId, ChannelId)) {
-        if let Some(queue) = self.packet_receipts.get_mut(channel_end) {
-            queue.clear();
-        }
-        self.packet_receipts.remove(channel_end);
-        if let Some(queue) = self.packet_commitments.get_mut(channel_end) {
-            queue.clear();
-        }
-        self.packet_commitments.remove(channel_end);
-        if let Some(queue) = self.packet_acknowledgements.get_mut(channel_end) {
-            queue.clear();
-        }
-        self.packet_acknowledgements.remove(channel_end);
-        self.next_sequence_send.remove(channel_end);
-        self.next_sequence_recv.remove(channel_end);
-        self.next_sequence_ack.remove(channel_end);
-        self.channels.remove(channel_end);
+    pub fn remove_channel(&mut self, port_channel_id: &(PortId, ChannelId)) {
+        self.packet_commitment_sequence_sets
+            .get(port_channel_id)
+            .map(|set| {
+                set.iter().for_each(|sequence| {
+                    env::storage_remove(
+                        &CommitmentPath::new(&port_channel_id.0, &port_channel_id.1, *sequence)
+                            .to_string()
+                            .into_bytes(),
+                    );
+                })
+            });
+        self.packet_receipt_sequence_sets
+            .get(port_channel_id)
+            .map(|set| {
+                set.iter().for_each(|sequence| {
+                    env::storage_remove(
+                        &ReceiptPath::new(&port_channel_id.0, &port_channel_id.1, *sequence)
+                            .to_string()
+                            .into_bytes(),
+                    );
+                });
+            });
+        self.packet_acknowledgement_sequence_sets
+            .get(port_channel_id)
+            .map(|set| {
+                set.iter().for_each(|sequence| {
+                    env::storage_remove(
+                        &AckPath::new(&port_channel_id.0, &port_channel_id.1, *sequence)
+                            .to_string()
+                            .into_bytes(),
+                    );
+                });
+            });
+        env::storage_remove(
+            &SeqSendPath(port_channel_id.0.clone(), port_channel_id.1.clone())
+                .to_string()
+                .into_bytes(),
+        );
+        env::storage_remove(
+            &SeqRecvPath(port_channel_id.0.clone(), port_channel_id.1.clone())
+                .to_string()
+                .into_bytes(),
+        );
+        env::storage_remove(
+            &SeqAckPath(port_channel_id.0.clone(), port_channel_id.1.clone())
+                .to_string()
+                .into_bytes(),
+        );
+        self.port_channel_id_set.remove(port_channel_id);
     }
     ///
     pub fn clear_counters(&mut self) {
-        self.client_ids_counter = 0;
-        self.connection_ids_counter = 0;
-        self.channel_ids_counter = 0;
+        self.client_counter = 0;
+        self.connection_counter = 0;
+        self.channel_counter = 0;
+    }
+    ///
+    pub fn clear_ibc_events_history(&mut self) {
+        self.ibc_events_history.clear();
     }
 }

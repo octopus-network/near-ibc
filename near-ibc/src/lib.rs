@@ -14,7 +14,7 @@ extern crate std;
 
 use crate::{
     context::NearIbcStore, ibc_impl::applications::transfer::TransferModule,
-    indexed_lookup_queue::IndexedLookupQueue, prelude::*,
+    collections::IndexedLookupQueue, prelude::*,
 };
 use core::str::FromStr;
 use ibc::{
@@ -33,7 +33,6 @@ use ibc::{
 };
 use ibc_proto::google::protobuf::Any;
 use itertools::Itertools;
-use module_holder::ModuleHolder;
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
@@ -43,7 +42,7 @@ use near_sdk::{
     log, near_bindgen,
     serde::{Deserialize, Serialize},
     serde_json,
-    store::{LookupMap, UnorderedMap, UnorderedSet},
+    store::LookupMap,
     AccountId, BorshStorageKey, PanicOnDefault, Promise,
 };
 use utils::{
@@ -57,7 +56,7 @@ use utils::{
 mod context;
 mod events;
 mod ibc_impl;
-mod indexed_lookup_queue;
+mod collections;
 pub mod migration;
 mod module_holder;
 mod prelude;
@@ -69,13 +68,11 @@ pub const DEFAULT_COMMITMENT_PREFIX: &str = "ibc";
 
 #[derive(BorshDeserialize, BorshSerialize, BorshStorageKey, Clone)]
 pub enum StorageKey {
-    ClientTypes,
-    ClientStates,
-    ConsensusStates,
-    ConsensusStatesIndex {
-        client_id: ClientId,
-    },
-    ConsensusStatesKey {
+    NearIbcStore,
+    PortToModule,
+    ClientIdSet,
+    ClientConsensusStateHeightSets,
+    ClientConsensusStateHeightSet {
         client_id: ClientId,
     },
     ClientProcessedTimes,
@@ -92,55 +89,22 @@ pub enum StorageKey {
     ClientProcessedHeightsKey {
         client_id: ClientId,
     },
-    ClientConnections,
-    ClientConnectionsVector {
-        client_id: ClientId,
-    },
-    Connections,
-    PortToModule,
-    ConnectionChannels,
-    ConnectionChannelsVector {
-        connection_id: ConnectionId,
-    },
-    Channels,
-    NextSequenceSend,
-    NextSequenceRecv,
-    NextSequenceAck,
-    PacketReceipt,
-    PacketReceiptIndex {
+    ConnectionIdSet,
+    PortChannelIdSet,
+    PacketCommitmentSequenceSets,
+    PacketCommitmentSequenceSet {
         port_id: PortId,
         channel_id: ChannelId,
     },
-    PacketReceiptKey {
+    PacketReceiptSequenceSets,
+    PacketReceiptSequenceSet {
         port_id: PortId,
         channel_id: ChannelId,
     },
-    PacketAcknowledgement,
-    PacketAcknowledgementIndex {
+    PacketAcknowledgementSequenceSets,
+    PacketAcknowledgementSequenceSet {
         port_id: PortId,
         channel_id: ChannelId,
-    },
-    PacketAcknowledgementKey {
-        port_id: PortId,
-        channel_id: ChannelId,
-    },
-    PacketCommitment,
-    PacketCommitmentIndex {
-        port_id: PortId,
-        channel_id: ChannelId,
-    },
-    PacketCommitmentKey {
-        port_id: PortId,
-        channel_id: ChannelId,
-    },
-    NearIbcStore,
-    ClientIds,
-    CachedConsensusStateKeys,
-    CachedConsensusStateKeysIndexMap {
-        client_id: ClientId,
-    },
-    CachedConsensusStateKeysValueMap {
-        client_id: ClientId,
     },
     IbcEventsHistoryIndexMap,
     IbcEventsHistoryValueMap,
@@ -150,7 +114,6 @@ pub enum StorageKey {
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct Contract {
     near_ibc_store: LazyOption<NearIbcStore>,
-    ibc_events_history: IndexedLookupQueue<u64, Vec<u8>>,
     governance_account: AccountId,
 }
 
@@ -160,40 +123,7 @@ impl Contract {
     #[init]
     pub fn init() -> Self {
         Self {
-            near_ibc_store: LazyOption::new(
-                StorageKey::NearIbcStore,
-                Some(&NearIbcStore {
-                    client_types: LookupMap::new(StorageKey::ClientTypes),
-                    client_states: UnorderedMap::new(StorageKey::ClientStates),
-                    consensus_states: LookupMap::new(StorageKey::ConsensusStates),
-                    client_processed_times: LookupMap::new(StorageKey::ClientProcessedTimes),
-                    client_processed_heights: LookupMap::new(StorageKey::ClientProcessedHeights),
-                    client_ids_counter: 0,
-                    client_connections: LookupMap::new(StorageKey::ClientConnections),
-                    connections: UnorderedMap::new(StorageKey::Connections),
-                    connection_ids_counter: 0,
-                    connection_channels: LookupMap::new(StorageKey::ConnectionChannels),
-                    channel_ids_counter: 0,
-                    channels: UnorderedMap::new(StorageKey::Channels),
-                    next_sequence_send: LookupMap::new(StorageKey::NextSequenceSend),
-                    next_sequence_recv: LookupMap::new(StorageKey::NextSequenceRecv),
-                    next_sequence_ack: LookupMap::new(StorageKey::NextSequenceAck),
-                    packet_receipts: LookupMap::new(StorageKey::PacketReceipt),
-                    packet_acknowledgements: LookupMap::new(StorageKey::PacketAcknowledgement),
-                    port_to_module: LookupMap::new(StorageKey::PortToModule),
-                    packet_commitments: LookupMap::new(StorageKey::PacketCommitment),
-                    module_holder: ModuleHolder::new(),
-                    client_ids: UnorderedSet::new(StorageKey::ClientIds),
-                    cached_consensus_state_keys: LookupMap::new(
-                        StorageKey::CachedConsensusStateKeys,
-                    ),
-                }),
-            ),
-            ibc_events_history: IndexedLookupQueue::new(
-                StorageKey::IbcEventsHistoryIndexMap,
-                StorageKey::IbcEventsHistoryValueMap,
-                u64::MAX,
-            ),
+            near_ibc_store: LazyOption::new(StorageKey::NearIbcStore, Some(&NearIbcStore::new())),
             governance_account: env::current_account_id(),
         }
     }
@@ -284,7 +214,9 @@ impl Contract {
     /// Only the governance account can call this function.
     pub fn set_max_length_of_ibc_events_history(&mut self, max_length: u64) {
         self.assert_governance();
-        self.ibc_events_history.set_max_length(max_length);
+        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store.ibc_events_history.set_max_length(max_length);
+        self.near_ibc_store.set(&near_ibc_store);
     }
     /// Setup the escrow contract for the given channel.
     ///
