@@ -1,4 +1,21 @@
-use crate::{context::NearIbcStore, ibc_impl::applications::transfer::TransferModule};
+#![no_std]
+#![deny(
+    warnings,
+    trivial_casts,
+    trivial_numeric_casts,
+    unused_import_braces,
+    unused_qualifications,
+    rust_2018_idioms
+)]
+
+extern crate alloc;
+#[cfg(any(test, feature = "std"))]
+extern crate std;
+
+use crate::{
+    context::NearIbcStore, ibc_impl::applications::transfer::TransferModule,
+    indexed_lookup_queue::IndexedLookupQueue, prelude::*,
+};
 use core::str::FromStr;
 use ibc::{
     applications::transfer::{
@@ -15,8 +32,8 @@ use ibc::{
     Height, Signer,
 };
 use ibc_proto::google::protobuf::Any;
-use indexed_lookup_queue::IndexedLookupQueue;
 use itertools::Itertools;
+use module_holder::ModuleHolder;
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
@@ -26,7 +43,7 @@ use near_sdk::{
     log, near_bindgen,
     serde::{Deserialize, Serialize},
     serde_json,
-    store::{LookupMap, UnorderedMap},
+    store::{LookupMap, UnorderedMap, UnorderedSet},
     AccountId, BorshStorageKey, PanicOnDefault, Promise,
 };
 use utils::{
@@ -37,18 +54,20 @@ use utils::{
     types::{AssetDenom, Ics20TransferRequest},
 };
 
-pub mod context;
-pub mod events;
-pub mod ibc_impl;
-pub mod indexed_lookup_queue;
+mod context;
+mod events;
+mod ibc_impl;
+mod indexed_lookup_queue;
 pub mod migration;
-pub mod testnet_functions;
+mod module_holder;
+mod prelude;
+mod testnet_functions;
 pub mod types;
 pub mod viewer;
 
 pub const DEFAULT_COMMITMENT_PREFIX: &str = "ibc";
 
-#[derive(BorshSerialize, BorshStorageKey)]
+#[derive(BorshDeserialize, BorshSerialize, BorshStorageKey, Clone)]
 pub enum StorageKey {
     ClientTypes,
     ClientStates,
@@ -115,8 +134,16 @@ pub enum StorageKey {
         channel_id: ChannelId,
     },
     NearIbcStore,
-    IbcEventsHistoryIndex,
-    IbcEventsHistoryKey,
+    ClientIds,
+    CachedConsensusStateKeys,
+    CachedConsensusStateKeysIndexMap {
+        client_id: ClientId,
+    },
+    CachedConsensusStateKeysValueMap {
+        client_id: ClientId,
+    },
+    IbcEventsHistoryIndexMap,
+    IbcEventsHistoryValueMap,
 }
 
 #[near_bindgen]
@@ -155,12 +182,16 @@ impl Contract {
                     packet_acknowledgements: LookupMap::new(StorageKey::PacketAcknowledgement),
                     port_to_module: LookupMap::new(StorageKey::PortToModule),
                     packet_commitments: LookupMap::new(StorageKey::PacketCommitment),
-                    transfer_module: TransferModule(),
+                    module_holder: ModuleHolder::new(),
+                    client_ids: UnorderedSet::new(StorageKey::ClientIds),
+                    cached_consensus_state_keys: LookupMap::new(
+                        StorageKey::CachedConsensusStateKeys,
+                    ),
                 }),
             ),
             ibc_events_history: IndexedLookupQueue::new(
-                StorageKey::IbcEventsHistoryIndex,
-                StorageKey::IbcEventsHistoryKey,
+                StorageKey::IbcEventsHistoryIndexMap,
+                StorageKey::IbcEventsHistoryValueMap,
                 u64::MAX,
             ),
             governance_account: env::current_account_id(),

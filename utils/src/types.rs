@@ -1,3 +1,4 @@
+use crate::prelude::*;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     json_types::U128,

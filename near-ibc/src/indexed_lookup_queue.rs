@@ -22,8 +22,12 @@ where
 {
     /// The map of index to K.
     index_map: LookupMap<u64, K>,
+    ///
+    index_map_storage_key_prefix: StorageKey,
     /// The map of K to V.
     value_map: LookupMap<K, V>,
+    ///
+    value_map_storage_key_prefix: StorageKey,
     /// The start index of valid anchor event.
     start_index: u64,
     /// The end index of valid anchor event.
@@ -45,8 +49,10 @@ where
         max_length: u64,
     ) -> Self {
         Self {
-            index_map: LookupMap::new(index_map_storage_key),
-            value_map: LookupMap::new(value_map_storage_key),
+            index_map: LookupMap::new(index_map_storage_key.clone()),
+            index_map_storage_key_prefix: index_map_storage_key,
+            value_map: LookupMap::new(value_map_storage_key.clone()),
+            value_map_storage_key_prefix: value_map_storage_key,
             start_index: 0,
             end_index: 0,
             max_length,
@@ -61,8 +67,10 @@ where
         max_length: u64,
     ) -> Self {
         Self {
-            index_map: LookupMap::new(index_map_storage_key),
-            value_map: LookupMap::new(value_map_storage_key),
+            index_map: LookupMap::new(index_map_storage_key.clone()),
+            index_map_storage_key_prefix: index_map_storage_key,
+            value_map: LookupMap::new(value_map_storage_key.clone()),
+            value_map_storage_key_prefix: value_map_storage_key,
             start_index,
             end_index,
             max_length,
@@ -82,6 +90,10 @@ where
     /// Add a new element to the queue.
     /// If the queue reaches max length, the oldest (first) element will be removed.
     pub fn push_back(&mut self, element: (K, V)) {
+        assert!(
+            self.end_index == 0 || &element.0 > self.index_map.get(&self.end_index).unwrap(),
+            "The key to be added should be larger than the latest key in the queue."
+        );
         self.index_map.insert(self.end_index + 1, element.0.clone());
         self.value_map.insert(element.0, element.1);
         if self.start_index == 0 && self.end_index == 0 {
@@ -109,14 +121,14 @@ where
             if let Some(key) = self.index_map.get(&index) {
                 env::storage_remove(
                     migration::get_storage_key_of_lookup_map(
-                        &StorageKey::IbcEventsHistoryKey,
+                        &self.index_map_storage_key_prefix,
                         &key,
                     )
                     .as_slice(),
                 );
                 env::storage_remove(
                     migration::get_storage_key_of_lookup_map(
-                        &StorageKey::IbcEventsHistoryIndex,
+                        &self.value_map_storage_key_prefix,
                         &index,
                     )
                     .as_slice(),
@@ -254,7 +266,7 @@ where
         }
         None
     }
-    /// Get the value that the corresponding key's index is 1 smaller than the given key's index.
+    /// Get the value of the maximum key less than the given key.
     pub fn get_previous_by_key(&self, key: &K) -> Option<V> {
         if let Some(index) = self.get_index_of_key(key) {
             if index > self.start_index {
@@ -263,10 +275,24 @@ where
                 None
             }
         } else {
-            None
+            // Get the maximum key less than the given key by binary search.
+            let mut start = self.start_index;
+            let mut end = self.end_index;
+            let mut result = None;
+            while start <= end {
+                let mid = start + (end - start) / 2;
+                let mid_key = self.index_map.get(&mid).unwrap();
+                if mid_key < key {
+                    result = Some(mid_key.clone());
+                    start = mid + 1;
+                } else {
+                    end = mid - 1;
+                }
+            }
+            result.map(|k| self.value_map.get(&k).map(|v| v.clone()).unwrap())
         }
     }
-    /// Get the value that the corresponding key's index is 1 bigger than the given key's index.
+    /// Get the value of the minimum key greater than the given key.
     pub fn get_next_by_key(&self, key: &K) -> Option<V> {
         if let Some(index) = self.get_index_of_key(key) {
             if index < self.end_index {
@@ -275,7 +301,21 @@ where
                 None
             }
         } else {
-            None
+            // Get the minimum key greater than the given key by binary search.
+            let mut start = self.start_index;
+            let mut end = self.end_index;
+            let mut result = None;
+            while start <= end {
+                let mid = start + (end - start) / 2;
+                let mid_key = self.index_map.get(&mid).unwrap();
+                if mid_key > key {
+                    result = Some(mid_key.clone());
+                    end = mid - 1;
+                } else {
+                    start = mid + 1;
+                }
+            }
+            result.map(|k| self.value_map.get(&k).map(|v| v.clone()).unwrap())
         }
     }
 }

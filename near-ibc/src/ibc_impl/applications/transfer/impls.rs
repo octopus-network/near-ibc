@@ -1,5 +1,5 @@
 use super::{AccountIdConversion, TransferModule};
-use crate::context::NearIbcStoreHost;
+use crate::{context::NearIbcStoreHost, prelude::*};
 use core::str::FromStr;
 use ibc::{
     applications::transfer::{

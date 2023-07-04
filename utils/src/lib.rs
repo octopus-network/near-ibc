@@ -1,3 +1,16 @@
+#![no_std]
+#![deny(
+    warnings,
+    trivial_casts,
+    trivial_numeric_casts,
+    unused_import_braces,
+    unused_qualifications,
+    rust_2018_idioms
+)]
+
+extern crate alloc;
+
+use prelude::*;
 use core::str::FromStr;
 use ibc::applications::transfer::PORT_ID_STR;
 use near_sdk::{
@@ -9,6 +22,7 @@ use near_sdk::{
 
 pub mod interfaces;
 mod macros;
+mod prelude;
 pub mod types;
 
 /// Gas for a complex function call.

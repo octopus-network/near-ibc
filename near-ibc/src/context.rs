@@ -1,11 +1,10 @@
 use crate::{
-    ibc_impl::{
-        applications::transfer::TransferModule,
-        core::host::type_define::{
-            IbcHostHeight, NearTimeStamp, RawClientState, RawConsensusState,
-        },
+    ibc_impl::core::host::type_define::{
+        IbcHostHeight, NearTimeStamp, RawClientState, RawConsensusState,
     },
     indexed_lookup_queue::IndexedLookupQueue,
+    module_holder::ModuleHolder,
+    prelude::*,
     StorageKey,
 };
 use core::fmt::{Debug, Formatter};
@@ -25,7 +24,7 @@ use ibc::{
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    store::{LookupMap, UnorderedMap, Vector},
+    store::{LookupMap, UnorderedMap, UnorderedSet, Vector},
 };
 
 #[derive(BorshDeserialize, BorshSerialize)]
@@ -51,8 +50,13 @@ pub struct NearIbcStore {
         LookupMap<(PortId, ChannelId), IndexedLookupQueue<Sequence, AcknowledgementCommitment>>,
     pub packet_commitments:
         LookupMap<(PortId, ChannelId), IndexedLookupQueue<Sequence, PacketCommitment>>,
-    /// To support the mutable borrow of `Router` in `Router::get_route_mut`
-    pub transfer_module: TransferModule,
+    /// To support the mutable borrow in `Router::get_route_mut`.
+    pub module_holder: ModuleHolder,
+    /// The client ids of the clients.
+    pub client_ids: UnorderedSet<ClientId>,
+    /// The storage keys of the consensus states of the clients.
+    /// The value in this queue is the storage key (in string format) of the consensus state.
+    pub cached_consensus_state_keys: LookupMap<ClientId, IndexedLookupQueue<Height, String>>,
 }
 
 pub trait NearIbcStoreHost {

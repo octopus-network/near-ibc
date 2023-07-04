@@ -1,4 +1,4 @@
-use crate::context::NearIbcStoreHost;
+use crate::{context::NearIbcStoreHost, prelude::*};
 use core::{fmt::Debug, str::FromStr};
 use ibc::{
     core::{
@@ -21,7 +21,7 @@ use near_sdk::{
 
 pub mod impls;
 
-pub struct AccountIdConversion(near_sdk::AccountId);
+pub struct AccountIdConversion(AccountId);
 
 #[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct TransferModule();

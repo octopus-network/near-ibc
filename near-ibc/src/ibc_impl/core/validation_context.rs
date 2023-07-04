@@ -1,12 +1,10 @@
-use super::AnyClientState;
-use crate::context::NearIbcStore;
-use core::fmt::{Debug, Formatter};
+use super::{client_state::AnyClientState, consensus_state::AnyConsensusState};
+use crate::{context::NearIbcStore, prelude::*};
+use core::{str::FromStr, time::Duration};
 use ibc::{
-    clients::ics07_tendermint::client_state::ClientState as TmClientState,
     core::{
         ics02_client::{
-            client_state::ClientState, client_type::ClientType, consensus_state::ConsensusState,
-            error::ClientError,
+            client_state::ClientState, consensus_state::ConsensusState, error::ClientError,
         },
         ics03_connection::{connection::ConnectionEnd, error::ConnectionError},
         ics04_channel::{
@@ -17,28 +15,29 @@ use ibc::{
         },
         ics23_commitment::commitment::CommitmentPrefix,
         ics24_host::{
-            identifier::{ChannelId, ClientId, ConnectionId, PortId},
-            path::ClientStatePath,
+            identifier::{ClientId, ConnectionId},
+            path::{
+                AckPath, ChannelEndPath, ClientConsensusStatePath, ClientStatePath, CommitmentPath,
+                ConnectionPath, Path, ReceiptPath, SeqAckPath, SeqRecvPath, SeqSendPath,
+            },
         },
-        router::{Module, ModuleId, Router},
         timestamp::Timestamp,
         ContextError, ValidationContext,
     },
-    Height,
+    Height, Signer,
 };
-use ibc_proto::{
-    google::protobuf::Any, ibc::lightclients::tendermint::v1::ClientState as RawTmClientState,
-    protobuf::Protobuf,
-};
-use near_sdk::{
-    borsh::maybestd::{borrow::Borrow, collections::BTreeMap, sync::Arc},
-    env, log,
-};
+use ibc_proto::{google::protobuf::Any, protobuf::Protobuf};
+use near_sdk::{borsh::BorshDeserialize, env, AccountId};
+
+/// Constants for commitment prefix generation.
+/// This column id is used when storing Key-Value data from a contract on an `account_id`.
+const CONTRACT_DATA: u8 = 9;
+const ACCOUNT_DATA_SEPARATOR: u8 = b',';
 
 impl ValidationContext for NearIbcStore {
     fn client_state(&self, client_id: &ClientId) -> Result<Box<dyn ClientState>, ContextError> {
-        let client_state_path = ClientStatePath(client_id.clone()).to_string().into_bytes();
-        match env::storage_read(&client_state_path) {
+        let client_state_key = ClientStatePath(client_id.clone()).to_string().into_bytes();
+        match env::storage_read(&client_state_key) {
             Some(data) => {
                 let result: AnyClientState =
                     Protobuf::<Any>::decode_vec(&data).map_err(|e| ClientError::Other {
@@ -56,18 +55,40 @@ impl ValidationContext for NearIbcStore {
         }
     }
 
-    fn decode_client_state(
-        &self,
-        client_state: ibc_proto::google::protobuf::Any,
-    ) -> Result<Box<dyn ClientState>, ContextError> {
-        todo!()
+    fn decode_client_state(&self, client_state: Any) -> Result<Box<dyn ClientState>, ContextError> {
+        let result = AnyClientState::try_from(client_state)?;
+        match result {
+            AnyClientState::Tendermint(tm_client_state) => Ok(Box::new(tm_client_state)),
+        }
     }
 
     fn consensus_state(
         &self,
-        client_cons_state_path: &ibc::core::ics24_host::path::ClientConsensusStatePath,
+        client_cons_state_path: &ClientConsensusStatePath,
     ) -> Result<Box<dyn ConsensusState>, ContextError> {
-        todo!()
+        let consensus_state_key = client_cons_state_path.to_string().into_bytes();
+        match env::storage_read(&consensus_state_key) {
+            Some(data) => {
+                let result: AnyConsensusState =
+                    Protobuf::<Any>::decode_vec(&data).map_err(|e| ClientError::Other {
+                        description: format!("Decode ConsensusState failed: {:?}", e).to_string(),
+                    })?;
+                match result {
+                    AnyConsensusState::Tendermint(tm_consensus_state) => {
+                        Ok(Box::new(tm_consensus_state))
+                    }
+                }
+            }
+            None => Err(ContextError::ClientError(
+                ClientError::ConsensusStateNotFound {
+                    client_id: client_cons_state_path.client_id.clone(),
+                    height: Height::new(
+                        client_cons_state_path.epoch,
+                        client_cons_state_path.height,
+                    )?,
+                },
+            )),
+        }
     }
 
     fn next_consensus_state(
@@ -75,7 +96,36 @@ impl ValidationContext for NearIbcStore {
         client_id: &ClientId,
         height: &Height,
     ) -> Result<Option<Box<dyn ConsensusState>>, ContextError> {
-        todo!()
+        if let Some(consensus_state_keys) = self.cached_consensus_state_keys.get(client_id) {
+            let consensus_state_key = consensus_state_keys.get_next_by_key(height);
+            if let Some(consensus_state_key) = consensus_state_key {
+                let path = Path::from_str(&consensus_state_key).map_err(|e| {
+                    ContextError::ClientError(ClientError::ClientSpecific {
+                        description: format!(
+                            "Invalid storage key in cached consensus state keys: {:?}",
+                            e
+                        )
+                        .to_string(),
+                    })
+                })?;
+                match path {
+                    Path::ClientConsensusState(client_cons_state_path) => self
+                        .consensus_state(&client_cons_state_path)
+                        .map(|cs| Some(cs)),
+                    _ => Err(ContextError::ClientError(ClientError::ClientSpecific {
+                        description: "Invalid path in cached consensus state keys.".to_string(),
+                    })),
+                }
+            } else {
+                Ok(None)
+            }
+        } else {
+            Err(ContextError::ClientError(
+                ClientError::ClientStateNotFound {
+                    client_id: client_id.clone(),
+                },
+            ))
+        }
     }
 
     fn prev_consensus_state(
@@ -83,94 +133,234 @@ impl ValidationContext for NearIbcStore {
         client_id: &ClientId,
         height: &Height,
     ) -> Result<Option<Box<dyn ConsensusState>>, ContextError> {
-        todo!()
+        if let Some(consensus_state_keys) = self.cached_consensus_state_keys.get(client_id) {
+            let consensus_state_key = consensus_state_keys.get_previous_by_key(height);
+            if let Some(consensus_state_key) = consensus_state_key {
+                let path = Path::from_str(&consensus_state_key).map_err(|e| {
+                    ContextError::ClientError(ClientError::ClientSpecific {
+                        description: format!(
+                            "Invalid storage key in cached consensus state keys: {:?}",
+                            e
+                        )
+                        .to_string(),
+                    })
+                })?;
+                match path {
+                    Path::ClientConsensusState(client_cons_state_path) => self
+                        .consensus_state(&client_cons_state_path)
+                        .map(|cs| Some(cs)),
+                    _ => Err(ContextError::ClientError(ClientError::ClientSpecific {
+                        description: "Invalid path in cached consensus state keys.".to_string(),
+                    })),
+                }
+            } else {
+                Ok(None)
+            }
+        } else {
+            Err(ContextError::ClientError(
+                ClientError::ClientStateNotFound {
+                    client_id: client_id.clone(),
+                },
+            ))
+        }
     }
 
     fn host_height(&self) -> Result<Height, ContextError> {
-        todo!()
+        Height::new(env::epoch_height(), env::block_height())
+            .map_err(|e| ContextError::ClientError(e))
     }
 
     fn host_timestamp(&self) -> Result<Timestamp, ContextError> {
-        todo!()
+        Timestamp::from_nanoseconds(env::block_timestamp())
+            .map_err(|e| ContextError::ClientError(ClientError::InvalidPacketTimestamp(e)))
     }
 
     fn host_consensus_state(
         &self,
-        height: &Height,
+        _height: &Height,
     ) -> Result<Box<dyn ConsensusState>, ContextError> {
-        todo!()
+        Err(ContextError::ClientError(ClientError::ClientSpecific {
+            description: format!("The `host_consensus_state` is not supported on NEAR protocol."),
+        }))
     }
 
     fn client_counter(&self) -> Result<u64, ContextError> {
-        todo!()
+        Ok(self.client_ids_counter)
     }
 
     fn connection_end(&self, conn_id: &ConnectionId) -> Result<ConnectionEnd, ContextError> {
-        todo!()
+        let path = ConnectionPath(conn_id.clone());
+        let connection_end_key = path.to_string().into_bytes();
+        match env::storage_read(&connection_end_key) {
+            Some(data) => {
+                let result =
+                    ConnectionEnd::try_from_slice(&data).map_err(|e| ClientError::Other {
+                        description: format!("Decode ConnectionEnd failed: {:?}", e).to_string(),
+                    })?;
+                Ok(result)
+            }
+            None => Err(ContextError::ConnectionError(
+                ConnectionError::ConnectionNotFound {
+                    connection_id: conn_id.clone(),
+                },
+            )),
+        }
     }
 
     fn validate_self_client(
         &self,
-        client_state_of_host_on_counterparty: ibc_proto::google::protobuf::Any,
+        client_state_of_host_on_counterparty: Any,
     ) -> Result<(), ContextError> {
-        todo!()
+        AnyClientState::try_from(client_state_of_host_on_counterparty).map_err(|e| {
+            ClientError::Other {
+                description: format!("Decode ClientState failed: {:?}", e).to_string(),
+            }
+        })?;
+        // todo: validate that the AnyClientState is Solomachine (for NEAR protocol)
+        Ok(())
     }
 
     fn commitment_prefix(&self) -> CommitmentPrefix {
-        todo!()
+        let mut prefix_bytes = vec![];
+        prefix_bytes.push(CONTRACT_DATA);
+        prefix_bytes.extend(env::current_account_id().as_bytes());
+        prefix_bytes.push(ACCOUNT_DATA_SEPARATOR);
+        CommitmentPrefix::try_from(prefix_bytes).unwrap()
     }
 
     fn connection_counter(&self) -> Result<u64, ContextError> {
-        todo!()
+        Ok(self.connection_ids_counter)
     }
 
-    fn channel_end(
-        &self,
-        channel_end_path: &ibc::core::ics24_host::path::ChannelEndPath,
-    ) -> Result<ChannelEnd, ContextError> {
-        todo!()
+    fn channel_end(&self, channel_end_path: &ChannelEndPath) -> Result<ChannelEnd, ContextError> {
+        let channel_end_key = channel_end_path.to_string().into_bytes();
+        match env::storage_read(&channel_end_key) {
+            Some(data) => {
+                let result = ChannelEnd::try_from_slice(&data).map_err(|e| ClientError::Other {
+                    description: format!("Decode ChannelEnd failed: {:?}", e).to_string(),
+                })?;
+                Ok(result)
+            }
+            None => Err(ContextError::ChannelError(ChannelError::ChannelNotFound {
+                port_id: channel_end_path.0.clone(),
+                channel_id: channel_end_path.1.clone(),
+            })),
+        }
     }
 
     fn get_next_sequence_send(
         &self,
-        seq_send_path: &ibc::core::ics24_host::path::SeqSendPath,
+        seq_send_path: &SeqSendPath,
     ) -> Result<Sequence, ContextError> {
-        todo!()
+        let seq_send_key = seq_send_path.to_string().into_bytes();
+        match env::storage_read(&seq_send_key) {
+            Some(data) => {
+                let result = Sequence::try_from_slice(&data).map_err(|e| ClientError::Other {
+                    description: format!("Decode Sequence failed: {:?}", e).to_string(),
+                })?;
+                Ok(result)
+            }
+            None => Err(ContextError::PacketError(PacketError::MissingNextSendSeq {
+                port_id: seq_send_path.0.clone(),
+                channel_id: seq_send_path.1.clone(),
+            })),
+        }
     }
 
     fn get_next_sequence_recv(
         &self,
-        seq_recv_path: &ibc::core::ics24_host::path::SeqRecvPath,
+        seq_recv_path: &SeqRecvPath,
     ) -> Result<Sequence, ContextError> {
-        todo!()
+        let seq_recv_key = seq_recv_path.to_string().into_bytes();
+        match env::storage_read(&seq_recv_key) {
+            Some(data) => {
+                let result = Sequence::try_from_slice(&data).map_err(|e| ClientError::Other {
+                    description: format!("Decode Sequence failed: {:?}", e).to_string(),
+                })?;
+                Ok(result)
+            }
+            None => Err(ContextError::PacketError(PacketError::MissingNextRecvSeq {
+                port_id: seq_recv_path.0.clone(),
+                channel_id: seq_recv_path.1.clone(),
+            })),
+        }
     }
 
-    fn get_next_sequence_ack(
-        &self,
-        seq_ack_path: &ibc::core::ics24_host::path::SeqAckPath,
-    ) -> Result<Sequence, ContextError> {
-        todo!()
+    fn get_next_sequence_ack(&self, seq_ack_path: &SeqAckPath) -> Result<Sequence, ContextError> {
+        let seq_ack_key = seq_ack_path.to_string().into_bytes();
+        match env::storage_read(&seq_ack_key) {
+            Some(data) => {
+                let result = Sequence::try_from_slice(&data).map_err(|e| ClientError::Other {
+                    description: format!("Decode Sequence failed: {:?}", e).to_string(),
+                })?;
+                Ok(result)
+            }
+            None => Err(ContextError::PacketError(PacketError::MissingNextAckSeq {
+                port_id: seq_ack_path.0.clone(),
+                channel_id: seq_ack_path.1.clone(),
+            })),
+        }
     }
 
     fn get_packet_commitment(
         &self,
-        commitment_path: &ibc::core::ics24_host::path::CommitmentPath,
+        commitment_path: &CommitmentPath,
     ) -> Result<PacketCommitment, ContextError> {
-        todo!()
+        let commitment_key = commitment_path.to_string().into_bytes();
+        match env::storage_read(&commitment_key) {
+            Some(data) => {
+                let result =
+                    PacketCommitment::try_from_slice(&data).map_err(|e| ClientError::Other {
+                        description: format!("Decode PacketCommitment failed: {:?}", e).to_string(),
+                    })?;
+                Ok(result)
+            }
+            None => Err(ContextError::PacketError(
+                PacketError::PacketCommitmentNotFound {
+                    sequence: commitment_path.sequence,
+                },
+            )),
+        }
     }
 
-    fn get_packet_receipt(
-        &self,
-        receipt_path: &ibc::core::ics24_host::path::ReceiptPath,
-    ) -> Result<Receipt, ContextError> {
-        todo!()
+    fn get_packet_receipt(&self, receipt_path: &ReceiptPath) -> Result<Receipt, ContextError> {
+        let receipt_key = receipt_path.to_string().into_bytes();
+        match env::storage_read(&receipt_key) {
+            Some(data) => {
+                let result = Receipt::try_from_slice(&data).map_err(|e| ClientError::Other {
+                    description: format!("Decode Receipt failed: {:?}", e).to_string(),
+                })?;
+                Ok(result)
+            }
+            None => Err(ContextError::PacketError(
+                PacketError::PacketReceiptNotFound {
+                    sequence: receipt_path.sequence,
+                },
+            )),
+        }
     }
 
     fn get_packet_acknowledgement(
         &self,
-        ack_path: &ibc::core::ics24_host::path::AckPath,
+        ack_path: &AckPath,
     ) -> Result<AcknowledgementCommitment, ContextError> {
-        todo!()
+        let ack_key = ack_path.to_string().into_bytes();
+        match env::storage_read(&ack_key) {
+            Some(data) => {
+                let result = AcknowledgementCommitment::try_from_slice(&data).map_err(|e| {
+                    ClientError::Other {
+                        description: format!("Decode AcknowledgementCommitment failed: {:?}", e)
+                            .to_string(),
+                    }
+                })?;
+                Ok(result)
+            }
+            None => Err(ContextError::PacketError(
+                PacketError::PacketAcknowledgementNotFound {
+                    sequence: ack_path.sequence,
+                },
+            )),
+        }
     }
 
     fn client_update_time(
@@ -178,7 +368,15 @@ impl ValidationContext for NearIbcStore {
         client_id: &ClientId,
         height: &Height,
     ) -> Result<Timestamp, ContextError> {
-        todo!()
+        self.client_processed_times
+            .get(client_id)
+            .and_then(|processed_times| processed_times.get_value_by_key(height))
+            .map(|ts| Timestamp::from_nanoseconds(ts).unwrap())
+            .ok_or_else(|| {
+                ContextError::ClientError(ClientError::ClientStateNotFound {
+                    client_id: client_id.clone(),
+                })
+            })
     }
 
     fn client_update_height(
@@ -186,18 +384,33 @@ impl ValidationContext for NearIbcStore {
         client_id: &ClientId,
         height: &Height,
     ) -> Result<Height, ContextError> {
-        todo!()
+        self.client_processed_heights
+            .get(client_id)
+            .and_then(|processed_heights| processed_heights.get_value_by_key(height))
+            .ok_or_else(|| {
+                ContextError::ClientError(ClientError::ClientStateNotFound {
+                    client_id: client_id.clone(),
+                })
+            })
     }
 
     fn channel_counter(&self) -> Result<u64, ContextError> {
-        todo!()
+        Ok(self.channel_ids_counter)
     }
 
-    fn max_expected_time_per_block(&self) -> std::time::Duration {
-        todo!()
+    fn max_expected_time_per_block(&self) -> Duration {
+        // In NEAR protocol, the block time is 1 second.
+        // Considering factors such as network latency, as a precaution,
+        // we set the duration to 3 seconds.
+        Duration::from_secs(3)
     }
 
-    fn validate_message_signer(&self, signer: &ibc::Signer) -> Result<(), ContextError> {
-        todo!()
+    fn validate_message_signer(&self, signer: &Signer) -> Result<(), ContextError> {
+        AccountId::from_str(signer.as_ref()).map_err(|e| {
+            ContextError::ClientError(ClientError::Other {
+                description: format!("Invalid signer: {:?}", e).to_string(),
+            })
+        })?;
+        Ok(())
     }
 }

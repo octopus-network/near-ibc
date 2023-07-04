@@ -1,3 +1,21 @@
+#![no_std]
+#![deny(
+    warnings,
+    trivial_casts,
+    trivial_numeric_casts,
+    unused_import_braces,
+    unused_qualifications,
+    rust_2018_idioms
+)]
+
+extern crate alloc;
+
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
 use ibc::applications::transfer::PORT_ID_STR;
 use near_contract_standards::fungible_token::core::ext_ft_core;
 use near_sdk::{
