@@ -137,7 +137,7 @@ impl Module for TransferModule {
     fn on_recv_packet_execute(
         &mut self,
         packet: &Packet,
-        relayer: &Signer,
+        _relayer: &Signer,
     ) -> (ModuleExtras, Acknowledgement) {
         ibc::applications::transfer::context::on_recv_packet_execute(self, packet)
     }
@@ -179,7 +179,18 @@ impl Module for TransferModule {
         counterparty: &Counterparty,
         version: &Version,
     ) -> Result<(ModuleExtras, Version), ChannelError> {
-        todo!()
+        ibc::applications::transfer::context::on_chan_open_init_execute(
+            self,
+            order,
+            connection_hops,
+            port_id,
+            channel_id,
+            counterparty,
+            version,
+        )
+        .map_err(|e| ChannelError::AppModule {
+            description: e.to_string(),
+        })
     }
 
     fn on_chan_open_try_execute(
@@ -191,16 +202,38 @@ impl Module for TransferModule {
         counterparty: &Counterparty,
         counterparty_version: &Version,
     ) -> Result<(ModuleExtras, Version), ChannelError> {
-        todo!()
+        ibc::applications::transfer::context::on_chan_open_try_execute(
+            self,
+            order,
+            connection_hops,
+            port_id,
+            channel_id,
+            counterparty,
+            counterparty_version,
+        )
+        .map_err(|e| ChannelError::AppModule {
+            description: e.to_string(),
+        })
     }
 
     fn on_acknowledgement_packet_execute(
         &mut self,
-        _packet: &Packet,
-        _acknowledgement: &Acknowledgement,
-        _relayer: &Signer,
+        packet: &Packet,
+        acknowledgement: &Acknowledgement,
+        relayer: &Signer,
     ) -> (ModuleExtras, Result<(), PacketError>) {
-        todo!()
+        let result = ibc::applications::transfer::context::on_acknowledgement_packet_execute(
+            self,
+            packet,
+            acknowledgement,
+            relayer,
+        );
+        (
+            result.0,
+            result.1.map_err(|e| PacketError::AppModule {
+                description: e.to_string(),
+            }),
+        )
     }
 
     fn on_timeout_packet_execute(
@@ -208,7 +241,14 @@ impl Module for TransferModule {
         packet: &Packet,
         relayer: &Signer,
     ) -> (ModuleExtras, Result<(), PacketError>) {
-        todo!()
+        let result =
+            ibc::applications::transfer::context::on_timeout_packet_execute(self, packet, relayer);
+        (
+            result.0,
+            result.1.map_err(|e| PacketError::AppModule {
+                description: e.to_string(),
+            }),
+        )
     }
 }
 

@@ -1,9 +1,27 @@
 use crate::*;
 
+#[derive(BorshDeserialize, BorshSerialize)]
+struct IndexedLookupQueue<K, V>
+where
+    K: BorshDeserialize + BorshSerialize + Clone + Ord,
+    V: BorshDeserialize + BorshSerialize + Clone,
+{
+    /// The map of index to K.
+    index_map: LookupMap<u64, K>,
+    /// The map of K to V.
+    value_map: LookupMap<K, V>,
+    /// The start index of valid anchor event.
+    start_index: u64,
+    /// The end index of valid anchor event.
+    end_index: u64,
+    /// The max length of queue.
+    max_length: u64,
+}
+
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct OldContract {
     near_ibc_store: LazyOption<NearIbcStore>,
-    ibc_events_history: IndexedAscendingLookupQueue<u64, Vec<u8>>,
+    ibc_events_history: IndexedLookupQueue<u64, Vec<u8>>,
     governance_account: AccountId,
 }
 
@@ -18,7 +36,7 @@ impl Contract {
         //
         // Create the new contract using the data from the old contract.
         let new_contract = Contract {
-            near_ibc_store: old_contract.near_ibc_store,
+            near_ibc_store: LazyOption::new(StorageKey::NearIbcStore, Some(&NearIbcStore::new())),
             governance_account: old_contract.governance_account,
         };
         //

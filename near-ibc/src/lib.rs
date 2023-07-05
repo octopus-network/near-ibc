@@ -12,10 +12,7 @@ extern crate alloc;
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
-use crate::{
-    collections::IndexedAscendingLookupQueue, context::NearIbcStore,
-    ibc_impl::applications::transfer::TransferModule, prelude::*,
-};
+use crate::{context::NearIbcStore, ibc_impl::applications::transfer::TransferModule, prelude::*};
 use core::str::FromStr;
 use ibc::{
     applications::transfer::{

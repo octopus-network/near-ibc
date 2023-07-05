@@ -20,7 +20,7 @@ use ibc::{
             identifier::{ChannelId, ClientId, ConnectionId, PortId},
             path::{ChannelEndPath, ClientConsensusStatePath, CommitmentPath, SeqSendPath},
         },
-        ContextError,
+        ContextError, ExecutionContext, ValidationContext,
     },
 };
 use near_sdk::{env, json_types::U128, log};
@@ -145,55 +145,60 @@ impl TokenTransferValidationContext for TransferModule {
 
     fn send_coins_validate(
         &self,
-        from_account: &Self::AccountId,
-        to_account: &Self::AccountId,
-        coin: &PrefixedCoin,
+        _from_account: &Self::AccountId,
+        _to_account: &Self::AccountId,
+        _coin: &PrefixedCoin,
     ) -> Result<(), TokenTransferError> {
-        todo!()
+        Ok(())
     }
 
     fn mint_coins_validate(
         &self,
-        account: &Self::AccountId,
-        coin: &PrefixedCoin,
+        _account: &Self::AccountId,
+        _coin: &PrefixedCoin,
     ) -> Result<(), TokenTransferError> {
-        todo!()
+        Ok(())
     }
 
     fn burn_coins_validate(
         &self,
-        account: &Self::AccountId,
-        coin: &PrefixedCoin,
+        _account: &Self::AccountId,
+        _coin: &PrefixedCoin,
     ) -> Result<(), TokenTransferError> {
-        todo!()
+        Ok(())
     }
 }
 
 impl SendPacketValidationContext for TransferModule {
     fn channel_end(&self, channel_end_path: &ChannelEndPath) -> Result<ChannelEnd, ContextError> {
-        todo!()
+        let store = Self::get_near_ibc_store();
+        ValidationContext::channel_end(&store, channel_end_path)
     }
 
     fn connection_end(&self, connection_id: &ConnectionId) -> Result<ConnectionEnd, ContextError> {
-        todo!()
+        let store = Self::get_near_ibc_store();
+        ValidationContext::connection_end(&store, connection_id)
     }
 
     fn client_state(&self, client_id: &ClientId) -> Result<Box<dyn ClientState>, ContextError> {
-        todo!()
+        let store = Self::get_near_ibc_store();
+        ValidationContext::client_state(&store, client_id)
     }
 
     fn client_consensus_state(
         &self,
         client_cons_state_path: &ClientConsensusStatePath,
     ) -> Result<Box<dyn ConsensusState>, ContextError> {
-        todo!()
+        let store = Self::get_near_ibc_store();
+        ValidationContext::consensus_state(&store, client_cons_state_path)
     }
 
     fn get_next_sequence_send(
         &self,
         seq_send_path: &SeqSendPath,
     ) -> Result<Sequence, ContextError> {
-        todo!()
+        let store = Self::get_near_ibc_store();
+        ValidationContext::get_next_sequence_send(&store, seq_send_path)
     }
 }
 
@@ -204,7 +209,8 @@ impl SendPacketExecutionContext for TransferModule {
         commitment: PacketCommitment,
     ) -> Result<(), ContextError> {
         let mut store = Self::get_near_ibc_store();
-        let result = store.store_packet_commitment(commitment_path, commitment);
+        let result =
+            ExecutionContext::store_packet_commitment(&mut store, commitment_path, commitment);
         Self::set_near_ibc_store(&store);
         result
     }
@@ -215,16 +221,20 @@ impl SendPacketExecutionContext for TransferModule {
         seq: Sequence,
     ) -> Result<(), ContextError> {
         let mut store = Self::get_near_ibc_store();
-        let result = store.store_next_sequence_send(seq_send_path, seq);
+        let result = ExecutionContext::store_next_sequence_send(&mut store, seq_send_path, seq);
         Self::set_near_ibc_store(&store);
         result
     }
 
     fn emit_ibc_event(&mut self, event: ibc::core::events::IbcEvent) {
-        todo!()
+        let mut store = Self::get_near_ibc_store();
+        ExecutionContext::emit_ibc_event(&mut store, event);
+        Self::set_near_ibc_store(&store);
     }
 
     fn log_message(&mut self, message: String) {
-        todo!()
+        let mut store = Self::get_near_ibc_store();
+        ExecutionContext::log_message(&mut store, message);
+        Self::set_near_ibc_store(&store);
     }
 }
