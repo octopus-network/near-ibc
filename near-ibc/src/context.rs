@@ -1,5 +1,7 @@
 use crate::{
-    collections::{IndexedLookupQueue, IndexedOrderedQueue},
+    collections::{
+        IndexedAscendingLookupQueue, IndexedAscendingQueueViewer, IndexedAscendingSimpleQueue,
+    },
     module_holder::ModuleHolder,
     prelude::*,
     StorageKey,
@@ -37,11 +39,14 @@ pub struct NearIbcStore {
     /// The client ids of the clients.
     pub client_id_set: UnorderedSet<ClientId>,
     pub client_counter: u64,
-    pub client_processed_times: LookupMap<ClientId, IndexedLookupQueue<Height, NearTimeStamp>>,
-    pub client_processed_heights: LookupMap<ClientId, IndexedLookupQueue<Height, HostHeight>>,
+    pub client_processed_times:
+        LookupMap<ClientId, IndexedAscendingLookupQueue<Height, NearTimeStamp>>,
+    pub client_processed_heights:
+        LookupMap<ClientId, IndexedAscendingLookupQueue<Height, HostHeight>>,
     /// This collection contains the heights corresponding to all consensus states of
     /// all clients stored in the contract.
-    pub client_consensus_state_height_sets: LookupMap<ClientId, IndexedOrderedQueue<Height>>,
+    pub client_consensus_state_height_sets:
+        LookupMap<ClientId, IndexedAscendingSimpleQueue<Height>>,
     /// The connection ids of the connections.
     pub connection_id_set: UnorderedSet<ConnectionId>,
     pub connection_counter: u64,
@@ -56,7 +61,7 @@ pub struct NearIbcStore {
     pub packet_acknowledgement_sequence_sets:
         LookupMap<(PortId, ChannelId), UnorderedSet<Sequence>>,
     /// The history of IBC events.
-    pub ibc_events_history: IndexedLookupQueue<Height, Vec<IbcEvent>>,
+    pub ibc_events_history: IndexedAscendingLookupQueue<Height, Vec<IbcEvent>>,
 }
 
 pub trait NearIbcStoreHost {
@@ -104,7 +109,7 @@ impl NearIbcStore {
             packet_acknowledgement_sequence_sets: LookupMap::new(
                 StorageKey::PacketAcknowledgementSequenceSets,
             ),
-            ibc_events_history: IndexedLookupQueue::new(
+            ibc_events_history: IndexedAscendingLookupQueue::new(
                 StorageKey::IbcEventsHistoryIndexMap,
                 StorageKey::IbcEventsHistoryValueMap,
                 u64::MAX,

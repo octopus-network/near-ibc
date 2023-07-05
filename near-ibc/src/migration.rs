@@ -3,7 +3,7 @@ use crate::*;
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct OldContract {
     near_ibc_store: LazyOption<NearIbcStore>,
-    ibc_events_history: IndexedLookupQueue<u64, Vec<u8>>,
+    ibc_events_history: IndexedAscendingLookupQueue<u64, Vec<u8>>,
     governance_account: AccountId,
 }
 

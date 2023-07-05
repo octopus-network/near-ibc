@@ -10,7 +10,6 @@
 
 extern crate alloc;
 
-use prelude::*;
 use core::str::FromStr;
 use ibc::applications::transfer::PORT_ID_STR;
 use near_sdk::{
@@ -19,6 +18,7 @@ use near_sdk::{
     serde::{Deserialize, Serialize},
     AccountId, Balance, Gas, Promise,
 };
+use prelude::*;
 
 pub mod interfaces;
 mod macros;

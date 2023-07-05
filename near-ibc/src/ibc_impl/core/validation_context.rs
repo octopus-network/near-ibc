@@ -1,5 +1,5 @@
 use super::{client_state::AnyClientState, consensus_state::AnyConsensusState};
-use crate::{context::NearIbcStore, prelude::*};
+use crate::{collections::IndexedAscendingQueueViewer, context::NearIbcStore, prelude::*};
 use core::{str::FromStr, time::Duration};
 use ibc::{
     core::{
@@ -104,7 +104,7 @@ impl ValidationContext for NearIbcStore {
     ) -> Result<Option<Box<dyn ConsensusState>>, ContextError> {
         if let Some(consensus_state_keys) = self.client_consensus_state_height_sets.get(client_id) {
             consensus_state_keys
-                .get_next_by_key(height)
+                .get_next_key_by_key(height)
                 .map(|next_height| {
                     self.consensus_state(&ClientConsensusStatePath::new(client_id, next_height))
                 })
@@ -123,7 +123,7 @@ impl ValidationContext for NearIbcStore {
     ) -> Result<Option<Box<dyn ConsensusState>>, ContextError> {
         if let Some(consensus_state_keys) = self.client_consensus_state_height_sets.get(client_id) {
             consensus_state_keys
-                .get_previous_by_key(height)
+                .get_previous_key_by_key(height)
                 .map(|next_height| {
                     self.consensus_state(&ClientConsensusStatePath::new(client_id, next_height))
                 })

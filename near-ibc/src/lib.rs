@@ -13,8 +13,8 @@ extern crate alloc;
 extern crate std;
 
 use crate::{
-    context::NearIbcStore, ibc_impl::applications::transfer::TransferModule,
-    collections::IndexedLookupQueue, prelude::*,
+    collections::IndexedAscendingLookupQueue, context::NearIbcStore,
+    ibc_impl::applications::transfer::TransferModule, prelude::*,
 };
 use core::str::FromStr;
 use ibc::{
@@ -23,7 +23,6 @@ use ibc::{
         PrefixedCoin, PrefixedDenom, TracePath,
     },
     core::{
-        events::IbcEvent,
         ics04_channel::timeout::TimeoutHeight,
         ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
         timestamp::Timestamp,
@@ -32,7 +31,6 @@ use ibc::{
     Height, Signer,
 };
 use ibc_proto::google::protobuf::Any;
-use itertools::Itertools;
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
@@ -53,10 +51,10 @@ use utils::{
     types::{AssetDenom, Ics20TransferRequest},
 };
 
+mod collections;
 mod context;
 mod events;
 mod ibc_impl;
-mod collections;
 pub mod migration;
 mod module_holder;
 mod prelude;

@@ -1,5 +1,8 @@
 use crate::{
-    collections::IndexedOrderedQueue, context::NearIbcStore, events::EventEmitter, prelude::*,
+    collections::{IndexedAscendingQueueViewer, IndexedAscendingSimpleQueue},
+    context::NearIbcStore,
+    events::EventEmitter,
+    prelude::*,
     StorageKey,
 };
 use core::fmt::Debug;
@@ -72,7 +75,7 @@ impl ExecutionContext for NearIbcStore {
         {
             self.client_consensus_state_height_sets.insert(
                 consensus_state_path.client_id.clone(),
-                IndexedOrderedQueue::new(
+                IndexedAscendingSimpleQueue::new(
                     StorageKey::ClientConsensusStateHeightSet {
                         client_id: consensus_state_path.client_id.clone(),
                     },

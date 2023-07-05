@@ -1,13 +1,11 @@
-use crate::types::{Qualified, QueryHeight};
 use crate::*;
-use crate::{types::QueryPacketEventDataRequest, Contract};
-use ibc::core::ics24_host::path::{
-    AckPath, ChannelEndPath, ClientConnectionPath, ClientConsensusStatePath, ClientStatePath,
-    CommitmentPath, ReceiptPath, SeqRecvPath,
+use crate::{
+    collections::IndexedAscendingQueueViewer,
+    types::{Qualified, QueryHeight, QueryPacketEventDataRequest},
 };
-use ibc::core::ValidationContext;
 use ibc::{
     core::{
+        events::IbcEvent,
         ics03_connection::connection::{ConnectionEnd, IdentifiedConnectionEnd},
         ics04_channel::{
             channel::{ChannelEnd, IdentifiedChannelEnd},
@@ -15,9 +13,21 @@ use ibc::{
             packet::Sequence,
         },
         ics23_commitment::commitment::CommitmentPrefix,
-        ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
+        ics24_host::{
+            identifier::{ChannelId, ClientId, ConnectionId, PortId},
+            path::{
+                AckPath, ChannelEndPath, ClientConnectionPath, ClientConsensusStatePath,
+                ClientStatePath, CommitmentPath, ReceiptPath, SeqRecvPath,
+            },
+        },
+        ValidationContext,
     },
     Height,
+};
+use itertools::Itertools;
+use near_sdk::{
+    borsh::{self, BorshDeserialize, BorshSerialize},
+    env, near_bindgen,
 };
 
 pub trait Viewer {
