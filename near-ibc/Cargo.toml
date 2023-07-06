@@ -17,3 +17,4 @@ serde = "1.0"
 getrandom = { version = "0.2", features = ["custom"] }
 token-factory = { path = "../token-factory" }
 utils = { path = "../utils" }
+ics06-solomachine = { git = "https://github.com/octopus-network/ics06-solomachine.git", branch = "for-near-ibc-pre2" }

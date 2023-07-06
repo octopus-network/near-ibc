@@ -51,6 +51,7 @@ impl ValidationContext for NearIbcStore {
                     })?;
                 match result {
                     AnyClientState::Tendermint(tm_client_state) => Ok(Box::new(tm_client_state)),
+                    AnyClientState::Solomachine(sm_client_state) => Ok(Box::new(sm_client_state)),
                 }
             }
             None => Err(ContextError::ClientError(
@@ -65,6 +66,7 @@ impl ValidationContext for NearIbcStore {
         let result = AnyClientState::try_from(client_state)?;
         match result {
             AnyClientState::Tendermint(tm_client_state) => Ok(Box::new(tm_client_state)),
+            AnyClientState::Solomachine(sm_client_state) => Ok(Box::new(sm_client_state)),
         }
     }
 
@@ -82,6 +84,9 @@ impl ValidationContext for NearIbcStore {
                 match result {
                     AnyConsensusState::Tendermint(tm_consensus_state) => {
                         Ok(Box::new(tm_consensus_state))
+                    }
+                    AnyConsensusState::Solomachine(sm_consensus_state) => {
+                        Ok(Box::new(sm_consensus_state))
                     }
                 }
             }
