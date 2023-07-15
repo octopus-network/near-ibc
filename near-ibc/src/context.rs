@@ -14,8 +14,8 @@ use ibc::{
         ics24_host::{
             identifier::{ChannelId, ClientId, ConnectionId, PortId},
             path::{
-                AckPath, ClientConnectionPath, ClientConsensusStatePath, CommitmentPath,
-                ConnectionPath, ReceiptPath, SeqAckPath, SeqRecvPath, SeqSendPath,
+                AckPath, ClientConnectionPath, ClientConsensusStatePath, ClientStatePath,
+                CommitmentPath, ConnectionPath, ReceiptPath, SeqAckPath, SeqRecvPath, SeqSendPath,
             },
         },
         router::ModuleId,
@@ -24,7 +24,7 @@ use ibc::{
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    env,
+    env, log,
     store::{LookupMap, UnorderedSet},
 };
 
@@ -145,12 +145,15 @@ impl NearIbcStore {
                 })
             });
         self.client_consensus_state_height_sets.remove(client_id);
+        env::storage_remove(&ClientStatePath::new(client_id).to_string().into_bytes());
         self.client_id_set.remove(client_id);
+        log!("Client '{}' has been removed.", client_id);
     }
     ///
     pub fn remove_connection(&mut self, connection_id: &ConnectionId) {
         env::storage_remove(&ConnectionPath::new(&connection_id).to_string().into_bytes());
         self.connection_id_set.remove(connection_id);
+        log!("Connection '{}' has been removed.", connection_id);
     }
     ///
     pub fn remove_channel(&mut self, port_channel_id: &(PortId, ChannelId)) {
@@ -203,6 +206,11 @@ impl NearIbcStore {
                 .into_bytes(),
         );
         self.port_channel_id_set.remove(port_channel_id);
+        log!(
+            "Channel '{}/{}' has been removed.",
+            port_channel_id.0,
+            port_channel_id.1
+        );
     }
     ///
     pub fn clear_counters(&mut self) {

@@ -22,13 +22,6 @@ impl Router for NearIbcStore {
         }
     }
     //
-    fn has_route(&self, module_id: &ModuleId) -> bool {
-        match module_id.to_string().as_str() {
-            ibc::applications::transfer::MODULE_ID_STR => true,
-            _ => false,
-        }
-    }
-    //
     fn lookup_module_by_port(&self, port_id: &PortId) -> Option<ModuleId> {
         self.port_to_module
             .get(port_id)

@@ -401,24 +401,22 @@ fn gether_ibc_events_with_height(
             IbcEvent::CreateClient(_) => true,
             IbcEvent::UpdateClient(_) => true,
             IbcEvent::ReceivePacket(receive_packet) => {
-                request.source_port_id.eq(receive_packet.src_port_id())
+                request.source_port_id.eq(receive_packet.port_id_on_b())
+                    && request.source_channel_id.eq(receive_packet.chan_id_on_b())
                     && request
-                        .source_channel_id
-                        .eq(receive_packet.src_channel_id())
-                    && request.destination_port_id.eq(receive_packet.dst_port_id())
+                        .destination_port_id
+                        .eq(receive_packet.port_id_on_a())
                     && request
                         .destination_channel_id
-                        .eq(receive_packet.dst_channel_id())
-                    && request.sequences.contains(&receive_packet.sequence())
+                        .eq(receive_packet.chan_id_on_a())
+                    && request.sequences.contains(&receive_packet.seq_on_b())
             }
             IbcEvent::WriteAcknowledgement(write_ack) => {
-                request.source_port_id.eq(write_ack.src_port_id())
-                    && request.source_channel_id.eq(write_ack.src_channel_id())
-                    && request.destination_port_id.eq(write_ack.dst_port_id())
-                    && request
-                        .destination_channel_id
-                        .eq(write_ack.dst_channel_id())
-                    && request.sequences.contains(&write_ack.sequence())
+                request.source_port_id.eq(write_ack.port_id_on_a())
+                    && request.source_channel_id.eq(write_ack.chan_id_on_a())
+                    && request.destination_port_id.eq(write_ack.port_id_on_b())
+                    && request.destination_channel_id.eq(write_ack.chan_id_on_b())
+                    && request.sequences.contains(&write_ack.seq_on_a())
             }
             _ => false,
         })

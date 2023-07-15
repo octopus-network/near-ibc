@@ -1,3 +1,4 @@
+use super::{client_state::AnyClientState, consensus_state::AnyConsensusState};
 use crate::{
     collections::{IndexedAscendingQueueViewer, IndexedAscendingSimpleQueue},
     context::NearIbcStore,
@@ -9,7 +10,7 @@ use core::fmt::Debug;
 use ibc::{
     core::{
         events::IbcEvent,
-        ics02_client::{client_state::ClientState, consensus_state::ConsensusState},
+        ics02_client::ClientExecutionContext,
         ics03_connection::{connection::ConnectionEnd, error::ConnectionError},
         ics04_channel::{
             channel::ChannelEnd,
@@ -36,11 +37,17 @@ use near_sdk::{
     store::{LookupMap, UnorderedSet},
 };
 
-impl ExecutionContext for NearIbcStore {
+impl ClientExecutionContext for NearIbcStore {
+    type ClientValidationContext = Self;
+
+    type AnyClientState = AnyClientState;
+
+    type AnyConsensusState = AnyConsensusState;
+
     fn store_client_state(
         &mut self,
         client_state_path: ClientStatePath,
-        client_state: Box<dyn ClientState>,
+        client_state: Self::AnyClientState,
     ) -> Result<(), ContextError> {
         log!(
             "store_client_state - path: {}, client_state: {:?}",
@@ -58,14 +65,14 @@ impl ExecutionContext for NearIbcStore {
     fn store_consensus_state(
         &mut self,
         consensus_state_path: ClientConsensusStatePath,
-        consensus_state: Box<dyn ConsensusState>,
+        consensus_state: Self::AnyConsensusState,
     ) -> Result<(), ContextError> {
         log!(
             "store_consensus_state - path: {}, consensus_state: {:?}",
             consensus_state_path,
             consensus_state
         );
-        let data = consensus_state.encode_vec();
+        let data = Protobuf::encode_vec(&consensus_state);
         let key = consensus_state_path.to_string().into_bytes();
         env::storage_write(&key, &data);
         //
@@ -92,7 +99,9 @@ impl ExecutionContext for NearIbcStore {
             });
         Ok(())
     }
+}
 
+impl ExecutionContext for NearIbcStore {
     fn increase_client_counter(&mut self) {
         self.client_counter += 1;
         log!("client_counter has increased to: {}", self.client_counter);
@@ -400,6 +409,10 @@ impl ExecutionContext for NearIbcStore {
 
     fn log_message(&mut self, message: String) {
         log!("{}", message);
+    }
+
+    fn get_client_execution_context(&mut self) -> &mut Self::E {
+        self
     }
 }
 

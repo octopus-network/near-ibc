@@ -1,11 +1,9 @@
 use super::{client_state::AnyClientState, consensus_state::AnyConsensusState};
-use crate::{collections::IndexedAscendingQueueViewer, context::NearIbcStore, prelude::*};
+use crate::{context::NearIbcStore, prelude::*};
 use core::{str::FromStr, time::Duration};
 use ibc::{
     core::{
-        ics02_client::{
-            client_state::ClientState, consensus_state::ConsensusState, error::ClientError,
-        },
+        ics02_client::error::ClientError,
         ics03_connection::{connection::ConnectionEnd, error::ConnectionError},
         ics04_channel::{
             channel::ChannelEnd,
@@ -41,7 +39,15 @@ const CONTRACT_DATA: u8 = 9;
 const ACCOUNT_DATA_SEPARATOR: u8 = b',';
 
 impl ValidationContext for NearIbcStore {
-    fn client_state(&self, client_id: &ClientId) -> Result<Box<dyn ClientState>, ContextError> {
+    type ClientValidationContext = Self;
+
+    type E = Self;
+
+    type AnyConsensusState = AnyConsensusState;
+
+    type AnyClientState = AnyClientState;
+
+    fn client_state(&self, client_id: &ClientId) -> Result<Self::AnyClientState, ContextError> {
         let client_state_key = ClientStatePath(client_id.clone()).to_string().into_bytes();
         match env::storage_read(&client_state_key) {
             Some(data) => {
@@ -49,10 +55,7 @@ impl ValidationContext for NearIbcStore {
                     Protobuf::<Any>::decode_vec(&data).map_err(|e| ClientError::Other {
                         description: format!("Decode ClientState failed: {:?}", e).to_string(),
                     })?;
-                match result {
-                    AnyClientState::Tendermint(tm_client_state) => Ok(Box::new(tm_client_state)),
-                    AnyClientState::Solomachine(sm_client_state) => Ok(Box::new(sm_client_state)),
-                }
+                Ok(result)
             }
             None => Err(ContextError::ClientError(
                 ClientError::ClientStateNotFound {
@@ -62,18 +65,14 @@ impl ValidationContext for NearIbcStore {
         }
     }
 
-    fn decode_client_state(&self, client_state: Any) -> Result<Box<dyn ClientState>, ContextError> {
-        let result = AnyClientState::try_from(client_state)?;
-        match result {
-            AnyClientState::Tendermint(tm_client_state) => Ok(Box::new(tm_client_state)),
-            AnyClientState::Solomachine(sm_client_state) => Ok(Box::new(sm_client_state)),
-        }
+    fn decode_client_state(&self, client_state: Any) -> Result<Self::AnyClientState, ContextError> {
+        Ok(AnyClientState::try_from(client_state)?)
     }
 
     fn consensus_state(
         &self,
         client_cons_state_path: &ClientConsensusStatePath,
-    ) -> Result<Box<dyn ConsensusState>, ContextError> {
+    ) -> Result<Self::AnyConsensusState, ContextError> {
         let consensus_state_key = client_cons_state_path.to_string().into_bytes();
         match env::storage_read(&consensus_state_key) {
             Some(data) => {
@@ -81,14 +80,7 @@ impl ValidationContext for NearIbcStore {
                     Protobuf::<Any>::decode_vec(&data).map_err(|e| ClientError::Other {
                         description: format!("Decode ConsensusState failed: {:?}", e).to_string(),
                     })?;
-                match result {
-                    AnyConsensusState::Tendermint(tm_consensus_state) => {
-                        Ok(Box::new(tm_consensus_state))
-                    }
-                    AnyConsensusState::Solomachine(sm_consensus_state) => {
-                        Ok(Box::new(sm_consensus_state))
-                    }
-                }
+                Ok(result)
             }
             None => Err(ContextError::ClientError(
                 ClientError::ConsensusStateNotFound {
@@ -99,44 +91,6 @@ impl ValidationContext for NearIbcStore {
                     )?,
                 },
             )),
-        }
-    }
-
-    fn next_consensus_state(
-        &self,
-        client_id: &ClientId,
-        height: &Height,
-    ) -> Result<Option<Box<dyn ConsensusState>>, ContextError> {
-        if let Some(consensus_state_keys) = self.client_consensus_state_height_sets.get(client_id) {
-            consensus_state_keys
-                .get_next_key_by_key(height)
-                .map(|next_height| {
-                    self.consensus_state(&ClientConsensusStatePath::new(client_id, next_height))
-                })
-                .map_or_else(|| Ok(None), |cs| Ok(Some(cs.unwrap())))
-        } else {
-            Err(ContextError::ClientError(
-                ClientError::MissingRawConsensusState,
-            ))
-        }
-    }
-
-    fn prev_consensus_state(
-        &self,
-        client_id: &ClientId,
-        height: &Height,
-    ) -> Result<Option<Box<dyn ConsensusState>>, ContextError> {
-        if let Some(consensus_state_keys) = self.client_consensus_state_height_sets.get(client_id) {
-            consensus_state_keys
-                .get_previous_key_by_key(height)
-                .map(|next_height| {
-                    self.consensus_state(&ClientConsensusStatePath::new(client_id, next_height))
-                })
-                .map_or_else(|| Ok(None), |cs| Ok(Some(cs.unwrap())))
-        } else {
-            Err(ContextError::ClientError(
-                ClientError::MissingRawConsensusState,
-            ))
         }
     }
 
@@ -153,7 +107,7 @@ impl ValidationContext for NearIbcStore {
     fn host_consensus_state(
         &self,
         _height: &Height,
-    ) -> Result<Box<dyn ConsensusState>, ContextError> {
+    ) -> Result<Self::AnyConsensusState, ContextError> {
         Err(ContextError::ClientError(ClientError::ClientSpecific {
             description: format!("The `host_consensus_state` is not supported on NEAR protocol."),
         }))
@@ -377,5 +331,9 @@ impl ValidationContext for NearIbcStore {
             })
         })?;
         Ok(())
+    }
+
+    fn get_client_validation_context(&self) -> &Self::ClientValidationContext {
+        &self
     }
 }

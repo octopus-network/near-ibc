@@ -72,4 +72,11 @@ impl Contract {
             .for_each(|port_channel_id| near_ibc_store.remove_channel(port_channel_id));
         self.near_ibc_store.set(&near_ibc_store);
     }
+    ///
+    pub fn remove_client(&mut self, client_id: ClientId) {
+        assert_testnet();
+        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store.remove_client(&client_id);
+        self.near_ibc_store.set(&near_ibc_store);
+    }
 }

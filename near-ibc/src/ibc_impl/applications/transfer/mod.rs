@@ -3,9 +3,9 @@ use core::{fmt::Debug, str::FromStr};
 use ibc::{
     core::{
         ics04_channel::{
+            acknowledgement::Acknowledgement,
             channel::{Counterparty, Order},
             error::{ChannelError, PacketError},
-            packet::Acknowledgement,
             packet::Packet,
             Version,
         },

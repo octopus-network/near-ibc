@@ -1,5 +1,9 @@
 use super::{AccountIdConversion, TransferModule};
-use crate::{context::NearIbcStoreHost, prelude::*};
+use crate::{
+    context::{NearIbcStore, NearIbcStoreHost},
+    ibc_impl::core::{client_state::AnyClientState, consensus_state::AnyConsensusState},
+    prelude::*,
+};
 use core::str::FromStr;
 use ibc::{
     applications::transfer::{
@@ -8,7 +12,6 @@ use ibc::{
         PrefixedCoin,
     },
     core::{
-        ics02_client::{client_state::ClientState, consensus_state::ConsensusState},
         ics03_connection::connection::ConnectionEnd,
         ics04_channel::{
             channel::ChannelEnd,
@@ -170,6 +173,14 @@ impl TokenTransferValidationContext for TransferModule {
 }
 
 impl SendPacketValidationContext for TransferModule {
+    type ClientValidationContext = NearIbcStore;
+
+    type E = NearIbcStore;
+
+    type AnyConsensusState = AnyConsensusState;
+
+    type AnyClientState = AnyClientState;
+
     fn channel_end(&self, channel_end_path: &ChannelEndPath) -> Result<ChannelEnd, ContextError> {
         let store = Self::get_near_ibc_store();
         ValidationContext::channel_end(&store, channel_end_path)
@@ -180,7 +191,7 @@ impl SendPacketValidationContext for TransferModule {
         ValidationContext::connection_end(&store, connection_id)
     }
 
-    fn client_state(&self, client_id: &ClientId) -> Result<Box<dyn ClientState>, ContextError> {
+    fn client_state(&self, client_id: &ClientId) -> Result<Self::AnyClientState, ContextError> {
         let store = Self::get_near_ibc_store();
         ValidationContext::client_state(&store, client_id)
     }
@@ -188,7 +199,7 @@ impl SendPacketValidationContext for TransferModule {
     fn client_consensus_state(
         &self,
         client_cons_state_path: &ClientConsensusStatePath,
-    ) -> Result<Box<dyn ConsensusState>, ContextError> {
+    ) -> Result<Self::AnyConsensusState, ContextError> {
         let store = Self::get_near_ibc_store();
         ValidationContext::consensus_state(&store, client_cons_state_path)
     }

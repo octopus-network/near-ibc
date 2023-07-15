@@ -1,7 +1,11 @@
 use crate::prelude::*;
 use ibc::{
     clients::ics07_tendermint::consensus_state::ConsensusState as TmConsensusState,
-    core::ics02_client::error::ClientError,
+    core::{
+        ics02_client::{consensus_state::ConsensusState, error::ClientError},
+        ics23_commitment::commitment::CommitmentRoot,
+        timestamp::Timestamp,
+    },
 };
 use ibc_proto::{
     google::protobuf::Any,
@@ -64,6 +68,77 @@ impl From<AnyConsensusState> for Any {
                 type_url: SOLOMACHINE_CONSENSUS_STATE_TYPE_URL.to_string(),
                 value: Protobuf::<RawSmConsensusState>::encode_vec(&value),
             },
+        }
+    }
+}
+
+impl From<TmConsensusState> for AnyConsensusState {
+    fn from(value: TmConsensusState) -> Self {
+        AnyConsensusState::Tendermint(value)
+    }
+}
+
+impl From<SmConsensusState> for AnyConsensusState {
+    fn from(value: SmConsensusState) -> Self {
+        AnyConsensusState::Solomachine(value)
+    }
+}
+
+impl ConsensusState for AnyConsensusState {
+    fn root(&self) -> &CommitmentRoot {
+        match self {
+            AnyConsensusState::Tendermint(value) => value.root(),
+            AnyConsensusState::Solomachine(value) => value.root(),
+        }
+    }
+
+    fn timestamp(&self) -> Timestamp {
+        match self {
+            AnyConsensusState::Tendermint(value) => value.timestamp(),
+            AnyConsensusState::Solomachine(value) => value.timestamp(),
+        }
+    }
+
+    fn encode_vec(&self) -> Vec<u8> {
+        match self {
+            AnyConsensusState::Tendermint(value) => {
+                ibc::core::ics02_client::consensus_state::ConsensusState::encode_vec(value)
+            }
+            AnyConsensusState::Solomachine(value) => {
+                ibc::core::ics02_client::consensus_state::ConsensusState::encode_vec(value)
+            }
+        }
+    }
+}
+
+impl TryInto<ibc::clients::ics07_tendermint::consensus_state::ConsensusState>
+    for AnyConsensusState
+{
+    type Error = ClientError;
+
+    fn try_into(
+        self,
+    ) -> Result<ibc::clients::ics07_tendermint::consensus_state::ConsensusState, Self::Error> {
+        match self {
+            AnyConsensusState::Tendermint(value) => Ok(value),
+            AnyConsensusState::Solomachine(_) => Err(ClientError::Other {
+                description: "Cannot convert solomachine consensus state to tendermint".to_string(),
+            }),
+        }
+    }
+}
+
+impl TryInto<ics06_solomachine::v2::consensus_state::ConsensusState> for AnyConsensusState {
+    type Error = ClientError;
+
+    fn try_into(
+        self,
+    ) -> Result<ics06_solomachine::v2::consensus_state::ConsensusState, Self::Error> {
+        match self {
+            AnyConsensusState::Tendermint(_) => Err(ClientError::Other {
+                description: "Cannot convert tendermint consensus state to solomachine".to_string(),
+            }),
+            AnyConsensusState::Solomachine(value) => Ok(value),
         }
     }
 }

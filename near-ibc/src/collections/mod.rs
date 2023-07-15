@@ -66,13 +66,16 @@ where
         let mut end = self.end_index();
         while start <= end {
             let mid = start + (end - start) / 2;
-            let mid_key = self.get_key_by_index(&mid).unwrap();
-            if mid_key == key {
-                return Some(mid);
-            } else if mid_key < key {
-                start = mid + 1;
+            if let Some(mid_key) = self.get_key_by_index(&mid) {
+                if mid_key == key {
+                    return Some(mid);
+                } else if mid_key < key {
+                    start = mid + 1;
+                } else {
+                    end = mid - 1;
+                }
             } else {
-                end = mid - 1;
+                return None;
             }
         }
         None
@@ -94,12 +97,15 @@ where
             let mut result = None;
             while start <= end {
                 let mid = start + (end - start) / 2;
-                let mid_key = self.get_key_by_index(&mid).unwrap();
-                if mid_key < key {
-                    result = Some(mid_key);
-                    start = mid + 1;
+                if let Some(mid_key) = self.get_key_by_index(&mid) {
+                    if mid_key < key {
+                        result = Some(mid_key);
+                        start = mid + 1;
+                    } else {
+                        end = mid - 1;
+                    }
                 } else {
-                    end = mid - 1;
+                    return None;
                 }
             }
             result
@@ -122,12 +128,15 @@ where
             let mut result = None;
             while start <= end {
                 let mid = start + (end - start) / 2;
-                let mid_key = self.get_key_by_index(&mid).unwrap();
-                if mid_key > key {
-                    result = Some(mid_key);
-                    end = mid - 1;
+                if let Some(mid_key) = self.get_key_by_index(&mid) {
+                    if mid_key > key {
+                        result = Some(mid_key);
+                        end = mid - 1;
+                    } else {
+                        start = mid + 1;
+                    }
                 } else {
-                    start = mid + 1;
+                    return None;
                 }
             }
             result
