@@ -24,16 +24,16 @@ use ibc::{
 use ibc_proto::{
     google::protobuf::Any,
     ibc::lightclients::{
-        solomachine::v2::ClientState as RawSmClientState,
+        solomachine::v3::ClientState as RawSmClientState,
         tendermint::v1::ClientState as RawTmClientState,
     },
     protobuf::Protobuf,
 };
-use ics06_solomachine::v2::client_state::ClientState as SmClientState;
+use ics06_solomachine::v3::client_state::ClientState as SmClientState;
 use serde::{Deserialize, Serialize};
 
 const TENDERMINT_CLIENT_STATE_TYPE_URL: &str = "/ibc.lightclients.tendermint.v1.ClientState";
-const SOLOMACHINE_CLIENT_STATE_TYPE_URL: &str = "/ibc.lightclients.solomachine.v2.ClientState";
+const SOLOMACHINE_CLIENT_STATE_TYPE_URL: &str = "/ibc.lightclients.solomachine.v3.ClientState";
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum AnyClientState {
@@ -382,7 +382,7 @@ impl ibc::clients::ics07_tendermint::ValidationContext for NearIbcStore {
     }
 }
 
-impl ics06_solomachine::v2::CommonContext for NearIbcStore {
+impl ics06_solomachine::v3::CommonContext for NearIbcStore {
     type ConversionError = ClientError;
 
     type AnyConsensusState = AnyConsensusState;
@@ -395,7 +395,7 @@ impl ics06_solomachine::v2::CommonContext for NearIbcStore {
     }
 }
 
-impl ics06_solomachine::v2::ValidationContext for NearIbcStore {
+impl ics06_solomachine::v3::ValidationContext for NearIbcStore {
     fn host_timestamp(&self) -> Result<Timestamp, ContextError> {
         ValidationContext::host_timestamp(self)
     }

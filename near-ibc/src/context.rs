@@ -18,7 +18,6 @@ use ibc::{
                 CommitmentPath, ConnectionPath, ReceiptPath, SeqAckPath, SeqRecvPath, SeqSendPath,
             },
         },
-        router::ModuleId,
     },
     Height,
 };
@@ -28,14 +27,13 @@ use near_sdk::{
     store::{LookupMap, UnorderedSet},
 };
 
-type NearTimeStamp = u64;
-type HostHeight = Height;
+pub type NearTimeStamp = u64;
+pub type HostHeight = Height;
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct NearIbcStore {
     /// To support the mutable borrow in `Router::get_route_mut`.
     pub module_holder: ModuleHolder,
-    pub port_to_module: LookupMap<PortId, ModuleId>,
     /// The client ids of the clients.
     pub client_id_set: UnorderedSet<ClientId>,
     pub client_counter: u64,
@@ -90,7 +88,6 @@ impl NearIbcStore {
     pub fn new() -> Self {
         Self {
             module_holder: ModuleHolder::new(),
-            port_to_module: LookupMap::new(StorageKey::PortToModule),
             client_id_set: UnorderedSet::new(StorageKey::ClientIdSet),
             client_counter: 0,
             client_processed_times: LookupMap::new(StorageKey::ClientProcessedTimes),

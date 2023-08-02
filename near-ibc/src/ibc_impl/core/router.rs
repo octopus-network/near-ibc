@@ -23,8 +23,6 @@ impl Router for NearIbcStore {
     }
     //
     fn lookup_module_by_port(&self, port_id: &PortId) -> Option<ModuleId> {
-        self.port_to_module
-            .get(port_id)
-            .map(|module_id| module_id.clone())
+        self.module_holder.get_module_id(port_id)
     }
 }

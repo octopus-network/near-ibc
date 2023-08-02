@@ -10,17 +10,17 @@ use ibc::{
 use ibc_proto::{
     google::protobuf::Any,
     ibc::lightclients::{
-        solomachine::v2::ConsensusState as RawSmConsensusState,
+        solomachine::v3::ConsensusState as RawSmConsensusState,
         tendermint::v1::ConsensusState as RawTmConsensusState,
     },
     protobuf::Protobuf,
 };
-use ics06_solomachine::v2::consensus_state::ConsensusState as SmConsensusState;
+use ics06_solomachine::v3::consensus_state::ConsensusState as SmConsensusState;
 use serde::{Deserialize, Serialize};
 
 const TENDERMINT_CONSENSUS_STATE_TYPE_URL: &str = "/ibc.lightclients.tendermint.v1.ConsensusState";
 const SOLOMACHINE_CONSENSUS_STATE_TYPE_URL: &str =
-    "/ibc.lightclients.solomachine.v2.ConsensusState";
+    "/ibc.lightclients.solomachine.v3.ConsensusState";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -128,12 +128,12 @@ impl TryInto<ibc::clients::ics07_tendermint::consensus_state::ConsensusState>
     }
 }
 
-impl TryInto<ics06_solomachine::v2::consensus_state::ConsensusState> for AnyConsensusState {
+impl TryInto<ics06_solomachine::v3::consensus_state::ConsensusState> for AnyConsensusState {
     type Error = ClientError;
 
     fn try_into(
         self,
-    ) -> Result<ics06_solomachine::v2::consensus_state::ConsensusState, Self::Error> {
+    ) -> Result<ics06_solomachine::v3::consensus_state::ConsensusState, Self::Error> {
         match self {
             AnyConsensusState::Tendermint(_) => Err(ClientError::Other {
                 description: "Cannot convert tendermint consensus state to solomachine".to_string(),
