@@ -62,6 +62,8 @@ pub trait Viewer {
     fn get_connections(&self) -> Vec<IdentifiedConnectionEnd>;
     /// Get all connections associated with the given client id.
     fn get_client_connections(&self, client_id: ClientId) -> Vec<ConnectionId>;
+    /// Get the channel ends associated with the given connection id.
+    fn get_connection_channels(&self, connection_id: ConnectionId) -> Vec<IdentifiedChannelEnd>;
     /// Get the channel ends associated with the given query request.
     fn get_channels(&self) -> Vec<IdentifiedChannelEnd>;
     /// Get the packet commitment stored on this host.
@@ -233,6 +235,28 @@ impl Viewer for Contract {
         env::storage_read(&key)
             .map(|bytes| ConnectionIds::try_from_slice(&bytes).unwrap().0)
             .unwrap_or(vec![])
+    }
+
+    fn get_connection_channels(&self, connection_id: ConnectionId) -> Vec<IdentifiedChannelEnd> {
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store
+            .port_channel_id_set
+            .iter()
+            .filter(|(port_id, channel_id)| {
+                near_ibc_store
+                    .channel_end(&ChannelEndPath::new(&port_id, &channel_id))
+                    .map_or(false, |channel_end| {
+                        channel_end.connection_hops.contains(&connection_id)
+                    })
+            })
+            .map(|(port_id, channel_id)| IdentifiedChannelEnd {
+                port_id: port_id.clone(),
+                channel_id: channel_id.clone(),
+                channel_end: near_ibc_store
+                    .channel_end(&ChannelEndPath::new(&port_id, &channel_id))
+                    .unwrap(),
+            })
+            .collect()
     }
 
     fn get_channels(&self) -> Vec<IdentifiedChannelEnd> {
