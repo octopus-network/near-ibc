@@ -140,6 +140,21 @@ where
         self.start_index = 0;
         self.end_index = 0;
     }
+    /// Flush lookup map to storage.
+    pub fn flush(&mut self) {
+        self.index_map.flush();
+        self.value_map.flush();
+    }
+}
+
+impl<K, V> Drop for IndexedAscendingLookupQueue<K, V>
+where
+    K: BorshDeserialize + BorshSerialize + Clone + Ord,
+    V: BorshDeserialize + BorshSerialize + Clone,
+{
+    fn drop(&mut self) {
+        self.flush();
+    }
 }
 
 impl<K, V> IndexedAscendingQueueViewer<K> for IndexedAscendingLookupQueue<K, V>

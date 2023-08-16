@@ -1,6 +1,7 @@
 use crate::{context::NearIbcStoreHost, prelude::*};
 use core::{fmt::Debug, str::FromStr};
 use ibc::{
+    applications::transfer::packet::PacketData,
     core::{
         ics04_channel::{
             acknowledgement::Acknowledgement,
@@ -14,9 +15,12 @@ use ibc::{
     },
     Signer,
 };
+use ibc_proto::ibc::apps::transfer::v2::FungibleTokenPacketData;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    AccountId,
+    log,
+    serde::{Deserialize, Serialize},
+    serde_json, AccountId,
 };
 
 pub mod impls;
@@ -139,7 +143,27 @@ impl Module for TransferModule {
         packet: &Packet,
         _relayer: &Signer,
     ) -> (ModuleExtras, Acknowledgement) {
-        ibc::applications::transfer::context::on_recv_packet_execute(self, packet)
+        log!(
+            "Received packet: {:?}",
+            String::from_utf8(packet.data.to_vec()).expect("Invalid packet data")
+        );
+        let ft_packet_data =
+            serde_json::from_slice::<FtPacketData>(&packet.data).expect("Invalid packet data");
+        let maybe_ft_packet = Packet {
+            data: serde_json::to_string(
+                &PacketData::try_from(FungibleTokenPacketData::from(ft_packet_data))
+                    .expect("Invalid packet data"),
+            )
+            .expect("Invalid packet data")
+            .into_bytes(),
+            ..packet.clone()
+        };
+        let (extras, ack) =
+            ibc::applications::transfer::context::on_recv_packet_execute(self, &maybe_ft_packet);
+        let ack_status =
+            String::from_utf8(ack.as_bytes().to_vec()).expect("Invalid acknowledgement string");
+        log!("Packet acknowledgement: {}", ack_status);
+        (extras, ack)
     }
 
     fn on_acknowledgement_packet_validate(
@@ -259,5 +283,32 @@ impl TryFrom<Signer> for AccountIdConversion {
         Ok(AccountIdConversion(
             AccountId::from_str(value.as_ref()).map_err(|_| "invalid signer")?,
         ))
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(crate = "near_sdk::serde")]
+pub struct FtPacketData {
+    /// the token denomination to be transferred
+    pub denom: String,
+    /// the token amount to be transferred
+    pub amount: String,
+    /// the sender address
+    pub sender: String,
+    /// the recipient address on the destination chain
+    pub receiver: String,
+    /// optional memo
+    pub memo: String,
+}
+
+impl From<FtPacketData> for FungibleTokenPacketData {
+    fn from(value: FtPacketData) -> Self {
+        FungibleTokenPacketData {
+            denom: value.denom,
+            amount: value.amount,
+            sender: value.sender,
+            receiver: value.receiver,
+            memo: value.memo,
+        }
     }
 }

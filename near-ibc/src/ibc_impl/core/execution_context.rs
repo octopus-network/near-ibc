@@ -1,6 +1,8 @@
 use super::{client_state::AnyClientState, consensus_state::AnyConsensusState};
 use crate::{
-    collections::{IndexedAscendingQueueViewer, IndexedAscendingSimpleQueue},
+    collections::{
+        IndexedAscendingLookupQueue, IndexedAscendingQueueViewer, IndexedAscendingSimpleQueue,
+    },
     context::NearIbcStore,
     events::EventEmitter,
     prelude::*,
@@ -119,6 +121,20 @@ impl ExecutionContext for NearIbcStore {
             height,
             timestamp
         );
+        if !self.client_processed_times.contains_key(&client_id) {
+            self.client_processed_times.insert(
+                client_id.clone(),
+                IndexedAscendingLookupQueue::new(
+                    StorageKey::ClientProcessedTimesIndex {
+                        client_id: client_id.clone(),
+                    },
+                    StorageKey::ClientProcessedTimesKey {
+                        client_id: client_id.clone(),
+                    },
+                    u64::MAX,
+                ),
+            );
+        }
         self.client_processed_times
             .get_mut(&client_id)
             .and_then(|processed_times| {
@@ -139,6 +155,20 @@ impl ExecutionContext for NearIbcStore {
             height,
             host_height
         );
+        if !self.client_processed_heights.contains_key(&client_id) {
+            self.client_processed_heights.insert(
+                client_id.clone(),
+                IndexedAscendingLookupQueue::new(
+                    StorageKey::ClientProcessedHeightsIndex {
+                        client_id: client_id.clone(),
+                    },
+                    StorageKey::ClientProcessedHeightsKey {
+                        client_id: client_id.clone(),
+                    },
+                    u64::MAX,
+                ),
+            );
+        }
         self.client_processed_heights
             .get_mut(&client_id)
             .and_then(|processed_heights| Some(processed_heights.push_back((height, host_height))));

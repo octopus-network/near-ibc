@@ -291,8 +291,11 @@ impl ValidationContext for NearIbcStore {
             .and_then(|processed_times| processed_times.get_value_by_key(height))
             .map(|ts| Timestamp::from_nanoseconds(*ts).unwrap())
             .ok_or_else(|| {
-                ContextError::ClientError(ClientError::ClientStateNotFound {
-                    client_id: client_id.clone(),
+                ContextError::ClientError(ClientError::Other {
+                    description: format!(
+                        "Client update time not found. client_id: {}, height: {}",
+                        client_id, height
+                    ),
                 })
             })
     }
@@ -307,8 +310,11 @@ impl ValidationContext for NearIbcStore {
             .and_then(|processed_heights| processed_heights.get_value_by_key(height))
             .map(|height: &Height| height.clone())
             .ok_or_else(|| {
-                ContextError::ClientError(ClientError::ClientStateNotFound {
-                    client_id: client_id.clone(),
+                ContextError::ClientError(ClientError::Other {
+                    description: format!(
+                        "Client update height not found. client_id: {}, height: {}",
+                        client_id, height
+                    ),
                 })
             })
     }
