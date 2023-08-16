@@ -1,4 +1,4 @@
-use crate::types::Ics20TransferRequest;
+use crate::{prelude::*, types::Ics20TransferRequest};
 use ibc::core::ics24_host::identifier::ChannelId;
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::{

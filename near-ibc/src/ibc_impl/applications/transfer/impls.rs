@@ -1,35 +1,38 @@
 use super::{AccountIdConversion, TransferModule};
-use crate::context::NearIbcStoreHost;
+use crate::{
+    context::{NearIbcStore, NearIbcStoreHost},
+    ibc_impl::core::{client_state::AnyClientState, consensus_state::AnyConsensusState},
+    prelude::*,
+};
 use core::str::FromStr;
 use ibc::{
     applications::transfer::{
-        context::{BankKeeper, TokenTransferContext, TokenTransferKeeper, TokenTransferReader},
+        context::{TokenTransferExecutionContext, TokenTransferValidationContext},
         error::TokenTransferError,
         PrefixedCoin,
     },
     core::{
-        ics02_client::{client_state::ClientState, consensus_state::ConsensusState},
         ics03_connection::connection::ConnectionEnd,
         ics04_channel::{
             channel::ChannelEnd,
             commitment::PacketCommitment,
-            context::{ChannelKeeper, ChannelReader, SendPacketReader},
-            error::PacketError,
+            context::{SendPacketExecutionContext, SendPacketValidationContext},
             packet::Sequence,
         },
-        ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
+        ics24_host::{
+            identifier::{ChannelId, ClientId, ConnectionId, PortId},
+            path::{ChannelEndPath, ClientConsensusStatePath, CommitmentPath, SeqSendPath},
+        },
+        ContextError, ExecutionContext, ValidationContext,
     },
-    Height,
 };
 use near_sdk::{env, json_types::U128, log};
 use utils::interfaces::{
     ext_channel_escrow, ext_process_transfer_request_callback, ext_token_factory,
 };
 
-impl BankKeeper for TransferModule {
-    type AccountId = AccountIdConversion;
-
-    fn send_coins(
+impl TokenTransferExecutionContext for TransferModule {
+    fn send_coins_execute(
         &mut self,
         from: &Self::AccountId,
         to: &Self::AccountId,
@@ -62,7 +65,7 @@ impl BankKeeper for TransferModule {
         Ok(())
     }
 
-    fn mint_coins(
+    fn mint_coins_execute(
         &mut self,
         account: &Self::AccountId,
         amt: &PrefixedCoin,
@@ -86,7 +89,7 @@ impl BankKeeper for TransferModule {
         Ok(())
     }
 
-    fn burn_coins(
+    fn burn_coins_execute(
         &mut self,
         account: &Self::AccountId,
         amt: &PrefixedCoin,
@@ -110,18 +113,18 @@ impl BankKeeper for TransferModule {
     }
 }
 
-impl TokenTransferReader for TransferModule {
-    type AccountId = <Self as TokenTransferContext>::AccountId;
+impl TokenTransferValidationContext for TransferModule {
+    type AccountId = AccountIdConversion;
 
     fn get_port(&self) -> Result<PortId, TokenTransferError> {
         Ok(PortId::transfer())
     }
 
-    fn get_channel_escrow_address(
+    fn get_escrow_account(
         &self,
         port_id: &PortId,
         channel_id: &ChannelId,
-    ) -> Result<<Self as TokenTransferReader>::AccountId, TokenTransferError> {
+    ) -> Result<Self::AccountId, TokenTransferError> {
         let escrow_account = format!(
             "{}.ef.{}.{}",
             channel_id.as_str(),
@@ -133,86 +136,116 @@ impl TokenTransferReader for TransferModule {
         ))
     }
 
-    fn is_send_enabled(&self) -> bool {
+    fn can_send_coins(&self) -> Result<(), TokenTransferError> {
         // TODO: check if this is correct
-        true
+        Ok(())
     }
 
-    fn is_receive_enabled(&self) -> bool {
+    fn can_receive_coins(&self) -> Result<(), TokenTransferError> {
         // TODO: check if this is correct
-        true
+        Ok(())
+    }
+
+    fn send_coins_validate(
+        &self,
+        _from_account: &Self::AccountId,
+        _to_account: &Self::AccountId,
+        _coin: &PrefixedCoin,
+    ) -> Result<(), TokenTransferError> {
+        Ok(())
+    }
+
+    fn mint_coins_validate(
+        &self,
+        _account: &Self::AccountId,
+        _coin: &PrefixedCoin,
+    ) -> Result<(), TokenTransferError> {
+        Ok(())
+    }
+
+    fn burn_coins_validate(
+        &self,
+        _account: &Self::AccountId,
+        _coin: &PrefixedCoin,
+    ) -> Result<(), TokenTransferError> {
+        Ok(())
     }
 }
 
-impl SendPacketReader for TransferModule {
-    fn channel_end(
-        &self,
-        port_id: &PortId,
-        channel_id: &ChannelId,
-    ) -> Result<ChannelEnd, PacketError> {
-        ChannelReader::channel_end(&Self::get_near_ibc_store(), port_id, channel_id)
-            .map_err(|err| PacketError::Channel(err))
+impl SendPacketValidationContext for TransferModule {
+    type ClientValidationContext = NearIbcStore;
+
+    type E = NearIbcStore;
+
+    type AnyConsensusState = AnyConsensusState;
+
+    type AnyClientState = AnyClientState;
+
+    fn channel_end(&self, channel_end_path: &ChannelEndPath) -> Result<ChannelEnd, ContextError> {
+        let store = Self::get_near_ibc_store();
+        ValidationContext::channel_end(&store, channel_end_path)
     }
 
-    fn connection_end(&self, connection_id: &ConnectionId) -> Result<ConnectionEnd, PacketError> {
-        ChannelReader::connection_end(&Self::get_near_ibc_store(), connection_id)
-            .map_err(|err| PacketError::Channel(err))
+    fn connection_end(&self, connection_id: &ConnectionId) -> Result<ConnectionEnd, ContextError> {
+        let store = Self::get_near_ibc_store();
+        ValidationContext::connection_end(&store, connection_id)
     }
 
-    fn client_state(&self, client_id: &ClientId) -> Result<Box<dyn ClientState>, PacketError> {
-        ChannelReader::client_state(&Self::get_near_ibc_store(), client_id)
-            .map_err(|err| PacketError::Channel(err))
+    fn client_state(&self, client_id: &ClientId) -> Result<Self::AnyClientState, ContextError> {
+        let store = Self::get_near_ibc_store();
+        ValidationContext::client_state(&store, client_id)
     }
 
     fn client_consensus_state(
         &self,
-        client_id: &ClientId,
-        height: &Height,
-    ) -> Result<Box<dyn ConsensusState>, PacketError> {
-        ChannelReader::client_consensus_state(&Self::get_near_ibc_store(), client_id, height)
-            .map_err(|err| PacketError::Channel(err))
+        client_cons_state_path: &ClientConsensusStatePath,
+    ) -> Result<Self::AnyConsensusState, ContextError> {
+        let store = Self::get_near_ibc_store();
+        ValidationContext::consensus_state(&store, client_cons_state_path)
     }
 
     fn get_next_sequence_send(
         &self,
-        port_id: &PortId,
-        channel_id: &ChannelId,
-    ) -> Result<Sequence, PacketError> {
-        ChannelReader::get_next_sequence_send(&Self::get_near_ibc_store(), port_id, channel_id)
-    }
-
-    fn hash(&self, value: &[u8]) -> Vec<u8> {
-        ChannelReader::hash(&Self::get_near_ibc_store(), value)
+        seq_send_path: &SeqSendPath,
+    ) -> Result<Sequence, ContextError> {
+        let store = Self::get_near_ibc_store();
+        ValidationContext::get_next_sequence_send(&store, seq_send_path)
     }
 }
 
-impl TokenTransferKeeper for TransferModule {
+impl SendPacketExecutionContext for TransferModule {
     fn store_packet_commitment(
         &mut self,
-        port_id: PortId,
-        channel_id: ChannelId,
-        sequence: Sequence,
+        commitment_path: &CommitmentPath,
         commitment: PacketCommitment,
-    ) -> Result<(), PacketError> {
+    ) -> Result<(), ContextError> {
         let mut store = Self::get_near_ibc_store();
-        let result = store.store_packet_commitment(port_id, channel_id, sequence, commitment);
+        let result =
+            ExecutionContext::store_packet_commitment(&mut store, commitment_path, commitment);
         Self::set_near_ibc_store(&store);
         result
     }
 
     fn store_next_sequence_send(
         &mut self,
-        port_id: PortId,
-        channel_id: ChannelId,
+        seq_send_path: &SeqSendPath,
         seq: Sequence,
-    ) -> Result<(), PacketError> {
+    ) -> Result<(), ContextError> {
         let mut store = Self::get_near_ibc_store();
-        let result = store.store_next_sequence_send(port_id, channel_id, seq);
+        let result = ExecutionContext::store_next_sequence_send(&mut store, seq_send_path, seq);
         Self::set_near_ibc_store(&store);
         result
     }
-}
 
-impl TokenTransferContext for TransferModule {
-    type AccountId = AccountIdConversion;
+    fn emit_ibc_event(&mut self, event: ibc::core::events::IbcEvent) {
+        let mut store = Self::get_near_ibc_store();
+        ExecutionContext::emit_ibc_event(&mut store, event);
+        Self::set_near_ibc_store(&store);
+    }
+
+    fn log_message(&mut self, message: String) {
+        let mut store = Self::get_near_ibc_store();
+        ExecutionContext::log_message(&mut store, message);
+        Self::set_near_ibc_store(&store);
+    }
 }

@@ -1,27 +1,33 @@
-use crate::{
-    context::{NearIbcStore, NearRouterContext},
-    events::EventEmit,
-    ibc_impl::applications::transfer::TransferModule,
-};
+#![no_std]
+#![deny(
+    warnings,
+    trivial_casts,
+    trivial_numeric_casts,
+    unused_import_braces,
+    unused_qualifications,
+    rust_2018_idioms
+)]
+
+extern crate alloc;
+#[cfg(any(test, feature = "std"))]
+extern crate std;
+
+use crate::{context::NearIbcStore, ibc_impl::applications::transfer::TransferModule, prelude::*};
+use core::str::FromStr;
 use ibc::{
     applications::transfer::{
-        msgs::transfer::MsgTransfer, relay::send_transfer::send_transfer, Amount, BaseDenom,
+        msgs::transfer::MsgTransfer, packet::PacketData, send_transfer, Amount, BaseDenom, Memo,
         PrefixedCoin, PrefixedDenom, TracePath,
     },
     core::{
         ics04_channel::timeout::TimeoutHeight,
         ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
-        ics26_routing::handler::MsgReceipt,
+        timestamp::Timestamp,
+        MsgEnvelope,
     },
-    events::IbcEvent,
-    handler::HandlerOutput,
-    signer::Signer,
-    timestamp::Timestamp,
-    Height,
+    Height, Signer,
 };
 use ibc_proto::google::protobuf::Any;
-use indexed_lookup_queue::IndexedLookupQueue;
-use itertools::Itertools;
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
@@ -31,10 +37,9 @@ use near_sdk::{
     log, near_bindgen,
     serde::{Deserialize, Serialize},
     serde_json,
-    store::{LookupMap, UnorderedMap},
+    store::LookupMap,
     AccountId, BorshStorageKey, PanicOnDefault, Promise,
 };
-use std::str::FromStr;
 use utils::{
     interfaces::{
         ext_channel_escrow, ext_escrow_factory, ext_process_transfer_request_callback,
@@ -43,26 +48,26 @@ use utils::{
     types::{AssetDenom, Ics20TransferRequest},
 };
 
-pub mod context;
-pub mod events;
-pub mod ibc_impl;
-pub mod indexed_lookup_queue;
+mod collections;
+mod context;
+mod events;
+mod ibc_impl;
 pub mod migration;
-pub mod testnet_functions;
+mod module_holder;
+mod prelude;
+mod testnet_functions;
 pub mod types;
 pub mod viewer;
 
 pub const DEFAULT_COMMITMENT_PREFIX: &str = "ibc";
 
-#[derive(BorshSerialize, BorshStorageKey)]
+#[derive(BorshDeserialize, BorshSerialize, BorshStorageKey, Clone)]
 pub enum StorageKey {
-    ClientTypes,
-    ClientStates,
-    ConsensusStates,
-    ConsensusStatesIndex {
-        client_id: ClientId,
-    },
-    ConsensusStatesKey {
+    NearIbcStore,
+    PortToModule,
+    ClientIdSet,
+    ClientConsensusStateHeightSets,
+    ClientConsensusStateHeightSet {
         client_id: ClientId,
     },
     ClientProcessedTimes,
@@ -79,57 +84,31 @@ pub enum StorageKey {
     ClientProcessedHeightsKey {
         client_id: ClientId,
     },
-    ClientConnections,
-    ClientConnectionsVector {
-        client_id: ClientId,
-    },
-    Connections,
-    PortToModule,
-    ConnectionChannels,
-    ConnectionChannelsVector {
-        connection_id: ConnectionId,
-    },
-    Channels,
-    NextSequenceSend,
-    NextSequenceRecv,
-    NextSequenceAck,
-    PacketReceipt,
-    PacketReceiptIndex {
+    ConnectionIdSet,
+    PortChannelIdSet,
+    PacketCommitmentSequenceSets,
+    PacketCommitmentSequenceSet {
         port_id: PortId,
         channel_id: ChannelId,
     },
-    PacketReceiptKey {
+    PacketReceiptSequenceSets,
+    PacketReceiptSequenceSet {
         port_id: PortId,
         channel_id: ChannelId,
     },
-    PacketAcknowledgement,
-    PacketAcknowledgementIndex {
+    PacketAcknowledgementSequenceSets,
+    PacketAcknowledgementSequenceSet {
         port_id: PortId,
         channel_id: ChannelId,
     },
-    PacketAcknowledgementKey {
-        port_id: PortId,
-        channel_id: ChannelId,
-    },
-    PacketCommitment,
-    PacketCommitmentIndex {
-        port_id: PortId,
-        channel_id: ChannelId,
-    },
-    PacketCommitmentKey {
-        port_id: PortId,
-        channel_id: ChannelId,
-    },
-    NearIbcStore,
-    IbcEventsHistoryIndex,
-    IbcEventsHistoryKey,
+    IbcEventsHistoryIndexMap,
+    IbcEventsHistoryValueMap,
 }
 
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct Contract {
     near_ibc_store: LazyOption<NearIbcStore>,
-    ibc_events_history: IndexedLookupQueue<u64, Vec<u8>>,
     governance_account: AccountId,
 }
 
@@ -139,35 +118,7 @@ impl Contract {
     #[init]
     pub fn init() -> Self {
         Self {
-            near_ibc_store: LazyOption::new(
-                StorageKey::NearIbcStore,
-                Some(&NearIbcStore {
-                    client_types: LookupMap::new(StorageKey::ClientTypes),
-                    client_states: UnorderedMap::new(StorageKey::ClientStates),
-                    consensus_states: LookupMap::new(StorageKey::ConsensusStates),
-                    client_processed_times: LookupMap::new(StorageKey::ClientProcessedTimes),
-                    client_processed_heights: LookupMap::new(StorageKey::ClientProcessedHeights),
-                    client_ids_counter: 0,
-                    client_connections: LookupMap::new(StorageKey::ClientConnections),
-                    connections: UnorderedMap::new(StorageKey::Connections),
-                    connection_ids_counter: 0,
-                    connection_channels: LookupMap::new(StorageKey::ConnectionChannels),
-                    channel_ids_counter: 0,
-                    channels: UnorderedMap::new(StorageKey::Channels),
-                    next_sequence_send: LookupMap::new(StorageKey::NextSequenceSend),
-                    next_sequence_recv: LookupMap::new(StorageKey::NextSequenceRecv),
-                    next_sequence_ack: LookupMap::new(StorageKey::NextSequenceAck),
-                    packet_receipts: LookupMap::new(StorageKey::PacketReceipt),
-                    packet_acknowledgements: LookupMap::new(StorageKey::PacketAcknowledgement),
-                    port_to_module: LookupMap::new(StorageKey::PortToModule),
-                    packet_commitments: LookupMap::new(StorageKey::PacketCommitment),
-                }),
-            ),
-            ibc_events_history: IndexedLookupQueue::new(
-                StorageKey::IbcEventsHistoryIndex,
-                StorageKey::IbcEventsHistoryKey,
-                u64::MAX,
-            ),
+            near_ibc_store: LazyOption::new(StorageKey::NearIbcStore, Some(&NearIbcStore::new())),
             governance_account: env::current_account_id(),
         }
     }
@@ -181,37 +132,23 @@ impl Contract {
         );
         let used_bytes = env::storage_usage();
         // Deliver messages to `ibc-rs`
-        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
 
-        let mut router_context = NearRouterContext::new(near_ibc_store);
-
-        let (events, logs, errors) = messages.into_iter().fold(
-            (vec![], vec![], vec![]),
-            |(mut events, mut logs, mut errors), msg| {
-                match ibc::core::ics26_routing::handler::deliver(&mut router_context, msg) {
-                    Ok(MsgReceipt {
-                        events: temp_events,
-                        log: temp_logs,
-                    }) => {
-                        events.extend(temp_events);
-                        logs.extend(temp_logs);
-                    }
+        let errors = messages.into_iter().fold(vec![], |mut errors, msg| {
+            match MsgEnvelope::try_from(msg) {
+                Ok(msg) => match ibc::core::dispatch(&mut near_ibc_store, msg) {
+                    Ok(()) => (),
                     Err(e) => errors.push(e),
-                }
-                (events, logs, errors)
-            },
-        );
-        self.near_ibc_store.set(&router_context.near_ibc_store);
-
-        log!("near ibc deliver logs: {:?}", logs);
-        log!("near ibc deliver errors: {:?}", errors);
-        for event in &events {
-            event.emit();
+                },
+                Err(e) => errors.push(e),
+            }
+            errors
+        });
+        if errors.len() > 0 {
+            log!("Error(s) occurred: {:?}", errors);
         }
-        // Save the IBC events history.
-        let raw_ibc_events = events.try_to_vec().unwrap();
-        self.ibc_events_history
-            .push_back((env::block_height(), raw_ibc_events));
+        self.near_ibc_store.set(&near_ibc_store);
+
         // Refund unused deposit.
         utils::refund_deposit(used_bytes, env::attached_deposit());
     }
@@ -272,7 +209,9 @@ impl Contract {
     /// Only the governance account can call this function.
     pub fn set_max_length_of_ibc_events_history(&mut self, max_length: u64) {
         self.assert_governance();
-        self.ibc_events_history.set_max_length(max_length);
+        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store.ibc_events_history.set_max_length(max_length);
+        self.near_ibc_store.set(&near_ibc_store);
     }
     /// Setup the escrow contract for the given channel.
     ///
@@ -327,20 +266,28 @@ utils::impl_storage_check_and_refund!(Contract);
 impl TransferRequestHandler for Contract {
     fn process_transfer_request(&mut self, transfer_request: Ics20TransferRequest) {
         utils::assert_sub_account();
-        let mut output = HandlerOutput::<()>::builder();
         if let Err(e) = send_transfer(
             &mut TransferModule(),
-            &mut output,
             MsgTransfer {
-                port_on_a: PortId::from_str(transfer_request.port_on_a.as_str()).unwrap(),
-                chan_on_a: ChannelId::from_str(transfer_request.chan_on_a.as_str()).unwrap(),
-                token: TransferringCoins {
-                    trace_path: transfer_request.token_trace_path.clone(),
-                    base_denom: transfer_request.token_denom.clone(),
-                    amount: transfer_request.amount.0.to_string(),
+                port_id_on_a: PortId::from_str(transfer_request.port_on_a.as_str()).unwrap(),
+                chan_id_on_a: ChannelId::from_str(transfer_request.chan_on_a.as_str()).unwrap(),
+                packet_data: PacketData {
+                    token: PrefixedCoin {
+                        denom: PrefixedDenom {
+                            trace_path: TracePath::from_str(
+                                transfer_request.token_trace_path.as_str(),
+                            )
+                            .unwrap(),
+                            base_denom: BaseDenom::from_str(transfer_request.token_denom.as_str())
+                                .unwrap(),
+                        },
+                        amount: Amount::from_str(transfer_request.amount.0.to_string().as_str())
+                            .unwrap(),
+                    },
+                    sender: Signer::from(transfer_request.sender.clone()),
+                    receiver: Signer::from(transfer_request.receiver.clone()),
+                    memo: Memo::from_str("").unwrap(),
                 },
-                sender: Signer::from_str(transfer_request.sender.as_str()).unwrap(),
-                receiver: Signer::from_str(transfer_request.receiver.as_str()).unwrap(),
                 timeout_height_on_b: TimeoutHeight::At(
                     Height::new(0, env::block_height() + 1000).unwrap(),
                 ),
@@ -368,14 +315,6 @@ impl TransferRequestHandler for Contract {
                     transfer_request.amount,
                 );
         }
-        let events = output.with_result(()).events;
-        for event in &events {
-            event.emit();
-        }
-        // Save the IBC events history.
-        let raw_ibc_events = events.try_to_vec().unwrap();
-        self.ibc_events_history
-            .push_back((env::block_height(), raw_ibc_events));
     }
 }
 

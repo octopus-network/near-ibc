@@ -1,4 +1,4 @@
-use crate::{viewer::Viewer, *};
+use crate::*;
 use near_sdk::near_bindgen;
 
 ///
@@ -15,7 +15,9 @@ impl Contract {
     pub fn clear_ibc_events_history(&mut self) {
         assert_testnet();
         self.assert_governance();
-        self.ibc_events_history.clear();
+        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store.clear_ibc_events_history();
+        self.near_ibc_store.set(&near_ibc_store);
     }
     ///
     pub fn clear_ibc_store_counters(&mut self) {
@@ -26,39 +28,55 @@ impl Contract {
         self.near_ibc_store.set(&near_ibc_store);
     }
     ///
+    pub fn clear_clients(&mut self) {
+        assert_testnet();
+        self.assert_governance();
+        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
+        let client_ids: Vec<ClientId> = near_ibc_store
+            .client_id_set
+            .iter()
+            .map(|id| id.clone())
+            .collect();
+        client_ids
+            .iter()
+            .for_each(|client_id| near_ibc_store.remove_client(client_id));
+        self.near_ibc_store.set(&near_ibc_store);
+    }
+    ///
+    pub fn clear_connections(&mut self) {
+        assert_testnet();
+        self.assert_governance();
+        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
+        let connection_ids: Vec<ConnectionId> = near_ibc_store
+            .connection_id_set
+            .iter()
+            .map(|id| id.clone())
+            .collect();
+        connection_ids
+            .iter()
+            .for_each(|connection_id| near_ibc_store.remove_connection(connection_id));
+        self.near_ibc_store.set(&near_ibc_store);
+    }
+    ///
+    pub fn clear_channels(&mut self) {
+        assert_testnet();
+        self.assert_governance();
+        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
+        let port_channel_ids: Vec<(PortId, ChannelId)> = near_ibc_store
+            .port_channel_id_set
+            .iter()
+            .map(|id| id.clone())
+            .collect();
+        port_channel_ids
+            .iter()
+            .for_each(|port_channel_id| near_ibc_store.remove_channel(port_channel_id));
+        self.near_ibc_store.set(&near_ibc_store);
+    }
+    ///
     pub fn remove_client(&mut self, client_id: ClientId) {
         assert_testnet();
-        self.assert_governance();
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
-        let connections = self.get_client_connections(client_id.clone());
-        for connection_id in connections {
-            let channels = self.get_connection_channels(connection_id.clone());
-            for channel in channels {
-                near_ibc_store.remove_channel(&(channel.port_id, channel.channel_id));
-            }
-            near_ibc_store.remove_connection(&connection_id);
-        }
         near_ibc_store.remove_client(&client_id);
-        self.near_ibc_store.set(&near_ibc_store);
-    }
-    ///
-    pub fn remove_connection(&mut self, connection_id: ConnectionId) {
-        assert_testnet();
-        self.assert_governance();
-        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
-        let channels = self.get_connection_channels(connection_id.clone());
-        for channel in channels {
-            near_ibc_store.remove_channel(&(channel.port_id, channel.channel_id));
-        }
-        near_ibc_store.remove_connection(&connection_id);
-        self.near_ibc_store.set(&near_ibc_store);
-    }
-    ///
-    pub fn remove_channel(&mut self, channel_end: (PortId, ChannelId)) {
-        assert_testnet();
-        self.assert_governance();
-        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
-        near_ibc_store.remove_channel(&channel_end);
         self.near_ibc_store.set(&near_ibc_store);
     }
 }

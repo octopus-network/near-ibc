@@ -1,3 +1,21 @@
+#![no_std]
+#![deny(
+    warnings,
+    trivial_casts,
+    trivial_numeric_casts,
+    unused_import_braces,
+    unused_qualifications,
+    rust_2018_idioms
+)]
+
+extern crate alloc;
+
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
 use ibc::core::ics24_host::identifier::ChannelId;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
