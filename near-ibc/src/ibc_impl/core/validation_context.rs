@@ -138,14 +138,10 @@ impl ValidationContext for NearIbcStore {
 
     fn validate_self_client(
         &self,
-        client_state_of_host_on_counterparty: Any,
+        _client_state_of_host_on_counterparty: Any,
     ) -> Result<(), ContextError> {
-        AnyClientState::try_from(client_state_of_host_on_counterparty).map_err(|e| {
-            ClientError::Other {
-                description: format!("Decode ClientState failed: {:?}", e).to_string(),
-            }
-        })?;
-        // todo: validate that the AnyClientState is Solomachine (for NEAR protocol)
+        // As we can not validate the client state of self chain,
+        // we return OK until we can find a way to do this.
         Ok(())
     }
 

@@ -76,8 +76,6 @@ pub trait WrappedToken {
     fn mint(&mut self, account_id: AccountId, amount: U128);
     /// Set the icon of the token.
     fn set_icon(&mut self, icon: String);
-    /// Set the basic metadata of the token.
-    fn set_basic_metadata(&mut self, name: String, symbol: String, decimals: u8);
 }
 
 /// Interfaces for transfer request handler contract (the `near-ibc` contract).

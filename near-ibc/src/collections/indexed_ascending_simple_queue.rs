@@ -115,15 +115,6 @@ where
     }
 }
 
-impl<K> Drop for IndexedAscendingSimpleQueue<K>
-where
-    K: BorshDeserialize + BorshSerialize + Clone + Ord,
-{
-    fn drop(&mut self) {
-        self.flush();
-    }
-}
-
 impl<K> IndexedAscendingQueueViewer<K> for IndexedAscendingSimpleQueue<K>
 where
     K: BorshDeserialize + BorshSerialize + Clone + Ord,

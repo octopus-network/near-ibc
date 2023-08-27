@@ -4,14 +4,13 @@ use crate::{
     module_holder::ModuleHolder,
     *,
 };
-use ibc::core::{events::IbcEvent, ics04_channel::packet::Sequence, router::ModuleId};
+use ibc::core::{events::IbcEvent, ics04_channel::packet::Sequence};
 use near_sdk::store::UnorderedSet;
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct OldNearIbcStore {
     /// To support the mutable borrow in `Router::get_route_mut`.
     pub module_holder: ModuleHolder,
-    pub port_to_module: LookupMap<PortId, ModuleId>,
     /// The client ids of the clients.
     pub client_id_set: UnorderedSet<ClientId>,
     pub client_counter: u64,
@@ -66,6 +65,7 @@ impl Contract {
             governance_account: old_contract.governance_account,
         };
         //
+        env::storage_write("version".as_bytes(), VERSION.as_bytes());
         //
         new_contract
     }

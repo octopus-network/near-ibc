@@ -33,6 +33,8 @@ pub const GAS_FOR_SIMPLE_FUNCTION_CALL: Gas = Gas(5_000_000_000_000);
 /// As the `deliver` function may cause storage changes, the caller needs to attach some NEAR
 /// to cover the storage cost. The minimum valid amount is 0.05 NEAR (for 5 kb storage).
 pub const MINIMUM_DEPOSIT_FOR_DELEVER_MSG: Balance = 50_000_000_000_000_000_000_000;
+/// The storage deposit for registering an account in the token contract. (0.0125 NEAR)
+pub const STORAGE_DEPOSIT_FOR_MINT_TOKEN: Balance = 12_500_000_000_000_000_000_000;
 /// Initial balance for the token contract to cover storage deposit.
 pub const INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT: Balance = 3_500_000_000_000_000_000_000_000;
 /// Initial balance for the channel escrow to cover storage deposit.
@@ -110,9 +112,9 @@ pub fn assert_grandparent_account() {
 /// Asserts that the predecessor account is the sub account of current account.
 pub fn assert_sub_account() {
     let account_id = env::predecessor_account_id().to_string();
-    let (_first, parent) = account_id.split_once(".").unwrap();
+    let prefixed_current_account = format!(".{}", env::current_account_id());
     assert!(
-        parent.ends_with(env::current_account_id().as_str()),
+        account_id.ends_with(prefixed_current_account.as_str()),
         "ERR_ONLY_SUB_ACCOUNT_CAN_CALL_THIS_METHOD"
     );
 }
@@ -120,9 +122,9 @@ pub fn assert_sub_account() {
 /// Asserts that the predecessor account is an ancestor account of current account.
 pub fn assert_ancestor_account() {
     let account_id = env::current_account_id().to_string();
-    let (_first, parent) = account_id.split_once(".").unwrap();
+    let prefixed_predecessor_account = format!(".{}", env::predecessor_account_id());
     assert!(
-        parent.ends_with(env::predecessor_account_id().as_str()),
+        account_id.ends_with(prefixed_predecessor_account.as_str()),
         "ERR_ONLY_UPPER_LEVEL_ACCOUNT_CAN_CALL_THIS_METHOD"
     );
 }

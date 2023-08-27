@@ -81,7 +81,6 @@ impl Contract {
         base_denom: String,
         near_ibc_account: AccountId,
     ) -> Self {
-        assert!(!env::state_exists(), "ERR_ALREADY_INITIALIZED");
         let account_id = String::from(env::current_account_id().as_str());
         let parts = account_id.split(".").collect::<Vec<&str>>();
         assert!(
@@ -213,26 +212,6 @@ impl WrappedToken for Contract {
         let used_bytes = env::storage_usage();
         let mut metadata = self.metadata.get().unwrap();
         metadata.icon = Some(icon);
-        self.metadata.set(&metadata);
-        // Refund the unused attached deposit.
-        utils::refund_deposit(used_bytes, env::attached_deposit());
-    }
-
-    #[payable]
-    fn set_basic_metadata(&mut self, name: String, symbol: String, decimals: u8) {
-        utils::assert_parent_account();
-        assert!(
-            env::attached_deposit()
-                >= env::storage_byte_cost()
-                    * (name.clone().into_bytes().len() + symbol.clone().into_bytes().len() + 1)
-                        as u128,
-            "ERR_NOT_ENOUGH_DEPOSIT"
-        );
-        let used_bytes = env::storage_usage();
-        let mut metadata = self.metadata.get().unwrap();
-        metadata.name = name;
-        metadata.symbol = symbol;
-        metadata.decimals = decimals;
         self.metadata.set(&metadata);
         // Refund the unused attached deposit.
         utils::refund_deposit(used_bytes, env::attached_deposit());

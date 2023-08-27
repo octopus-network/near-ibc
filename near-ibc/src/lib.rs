@@ -59,7 +59,7 @@ mod testnet_functions;
 pub mod types;
 pub mod viewer;
 
-pub const DEFAULT_COMMITMENT_PREFIX: &str = "ibc";
+pub const VERSION: &str = "v1.0.0-pre.3";
 
 #[derive(BorshDeserialize, BorshSerialize, BorshStorageKey, Clone)]
 pub enum StorageKey {
@@ -117,6 +117,7 @@ impl Contract {
     #[private]
     #[init]
     pub fn init() -> Self {
+        env::storage_write("version".as_bytes(), VERSION.as_bytes());
         Self {
             near_ibc_store: LazyOption::new(StorageKey::NearIbcStore, Some(&NearIbcStore::new())),
             governance_account: env::current_account_id(),
@@ -126,7 +127,8 @@ impl Contract {
     #[payable]
     pub fn deliver(&mut self, messages: Vec<Any>) {
         assert!(
-            env::attached_deposit() >= utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG,
+            env::attached_deposit()
+                >= utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG * messages.len() as u128,
             "Need to attach at least {} yocto NEAR to cover the possible storage cost.",
             utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG
         );
@@ -243,6 +245,7 @@ impl Contract {
     /// Register the given token contract for the given channel.
     ///
     /// Only the governance account can call this function.
+    #[payable]
     pub fn register_asset_for_channel(
         &mut self,
         channel_id: String,
@@ -250,6 +253,14 @@ impl Contract {
         token_contract: AccountId,
     ) {
         self.assert_governance();
+        let minimum_deposit =
+            env::storage_byte_cost() * (denom.len() + token_contract.to_string().len()) as u128;
+        assert!(
+            env::attached_deposit() >= minimum_deposit,
+            "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
+            minimum_deposit
+        );
+        let used_bytes = env::storage_usage();
         let escrow_account_id =
             format!("{}.{}", channel_id, utils::get_escrow_factory_contract_id());
         ext_channel_escrow::ext(AccountId::from_str(escrow_account_id.as_str()).unwrap())
@@ -257,6 +268,7 @@ impl Contract {
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
             .with_unused_gas_weight(0)
             .register_asset(denom, token_contract);
+        utils::refund_deposit(used_bytes, env::attached_deposit() - minimum_deposit);
     }
 }
 

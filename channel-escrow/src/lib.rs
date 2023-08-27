@@ -45,7 +45,6 @@ pub enum StorageKey {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub struct FtOnTransferMsg {
-    pub token_denom: String,
     pub receiver: String,
 }
 
@@ -64,7 +63,6 @@ pub struct Contract {
 impl Contract {
     #[init]
     pub fn new(near_ibc_account: AccountId) -> Self {
-        assert!(!env::state_exists(), "ERR_ALREADY_INITIALIZED");
         let account_id = String::from(env::current_account_id().as_str());
         let parts = account_id.split(".").collect::<Vec<&str>>();
         assert!(
@@ -84,13 +82,8 @@ impl Contract {
         amount: U128,
         msg: String,
     ) -> PromiseOrValue<U128> {
-        assert!(
-            self.token_contracts
-                .values()
-                .into_iter()
-                .any(|id| env::predecessor_account_id().eq(id)),
-            "ERR_UNREGISTERED_TOKEN_CONTRACT"
-        );
+        let token_denom = self.get_denom_by_token_contract(&env::predecessor_account_id());
+        assert!(token_denom.is_some(), "ERR_UNREGISTERED_TOKEN_CONTRACT");
         assert!(
             !self.pending_transfer_requests.contains_key(&sender_id),
             "ERR_PENDING_TRANSFER_REQUEST_EXISTS"
@@ -108,7 +101,7 @@ impl Contract {
             port_on_a: PORT_ID_STR.to_string(),
             chan_on_a: channel_id.to_string(),
             token_trace_path: String::new(),
-            token_denom: msg.token_denom,
+            token_denom: token_denom.unwrap(),
             amount,
             sender: sender_id.to_string(),
             receiver: msg.receiver,
@@ -140,13 +133,22 @@ impl Contract {
         }
         self.pending_transfer_requests.remove(&account_id);
     }
+    // Get the denom by the given token contract account id.
+    fn get_denom_by_token_contract(&self, token_contract: &AccountId) -> Option<String> {
+        self.token_contracts
+            .iter()
+            .find(|(_, id)| *id == token_contract)
+            .map(|(denom, _)| denom.clone())
+    }
 }
 
 utils::impl_storage_check_and_refund!(Contract);
 
 #[near_bindgen]
 impl ChannelEscrow for Contract {
+    #[payable]
     fn register_asset(&mut self, denom: String, token_contract: AccountId) {
+        self.assert_near_ibc_account();
         assert!(
             !self
                 .token_contracts
@@ -206,7 +208,7 @@ impl NearIbcAccountAssertion for Contract {
     }
 }
 
-/// View functions for the wrapped token.
+/// View functions.
 #[near_bindgen]
 impl Contract {
     ///
