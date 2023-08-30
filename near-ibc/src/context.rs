@@ -73,7 +73,7 @@ pub trait NearIbcStoreHost {
     ///
     fn set_near_ibc_store(store: &NearIbcStore) {
         let store = store.try_to_vec().unwrap();
-        near_sdk::env::storage_write(b"ibc_store", &store);
+        near_sdk::env::storage_write(&StorageKey::NearIbcStore.try_to_vec().unwrap(), &store);
     }
 }
 

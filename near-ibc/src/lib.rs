@@ -131,7 +131,7 @@ impl Contract {
             env::attached_deposit()
                 >= utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG * messages.len() as u128,
             "Need to attach at least {} yocto NEAR to cover the possible storage cost.",
-            utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG
+            utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG * messages.len() as u128
         );
         let used_bytes = env::storage_usage();
         ExtraDepositCost::reset();
