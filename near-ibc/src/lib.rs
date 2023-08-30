@@ -40,6 +40,7 @@ use near_sdk::{
     store::LookupMap,
     AccountId, BorshStorageKey, PanicOnDefault,
 };
+use types::ProcessingResult;
 use utils::{
     interfaces::{
         ext_channel_escrow, ext_escrow_factory, ext_process_transfer_request_callback,
@@ -213,11 +214,12 @@ impl Contract {
     /// Set the max length of the IBC events history queue.
     ///
     /// Only the governance account can call this function.
-    pub fn set_max_length_of_ibc_events_history(&mut self, max_length: u64) {
+    pub fn set_max_length_of_ibc_events_history(&mut self, max_length: u64) -> ProcessingResult {
         self.assert_governance();
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
-        near_ibc_store.ibc_events_history.set_max_length(max_length);
+        let result = near_ibc_store.ibc_events_history.set_max_length(max_length);
         self.near_ibc_store.set(&near_ibc_store);
+        result
     }
     /// Setup the escrow contract for the given channel.
     ///

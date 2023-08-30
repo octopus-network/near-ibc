@@ -1,4 +1,4 @@
-use crate::*;
+use crate::{types::ProcessingResult, *};
 
 use super::IndexedAscendingQueueViewer;
 
@@ -87,14 +87,26 @@ where
         }
     }
     ///
-    pub fn set_max_length(&mut self, max_length: u64) {
+    pub fn set_max_length(&mut self, max_length: u64) -> ProcessingResult {
         self.max_length = max_length;
+        let max_gas = env::prepaid_gas() * 4 / 5;
         while self.end_index - self.start_index + 1 > self.max_length {
             self.pop_front();
+            self.flush();
+            if env::used_gas() >= max_gas {
+                log!(
+                    "New index range of queue: {} - {}",
+                    self.start_index,
+                    self.end_index
+                );
+                return ProcessingResult::NeedMoreGas;
+            }
         }
+        ProcessingResult::Ok
     }
     /// Clear the queue.
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self) -> ProcessingResult {
+        let max_gas = env::prepaid_gas() * 4 / 5;
         for index in self.start_index..self.end_index + 1 {
             if let Some(key) = self.index_map.get(&index) {
                 env::storage_remove(
@@ -105,9 +117,14 @@ where
                     .as_slice(),
                 );
             }
+            if env::used_gas() >= max_gas {
+                self.start_index = index + 1;
+                return ProcessingResult::NeedMoreGas;
+            }
         }
         self.start_index = 0;
         self.end_index = 0;
+        ProcessingResult::Ok
     }
     /// Flush the lookup map to storage.
     pub fn flush(&mut self) {
