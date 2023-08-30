@@ -27,8 +27,9 @@ use ibc::{
     },
 };
 use near_sdk::{env, json_types::U128, log};
-use utils::interfaces::{
-    ext_channel_escrow, ext_process_transfer_request_callback, ext_token_factory,
+use utils::{
+    interfaces::{ext_channel_escrow, ext_process_transfer_request_callback, ext_token_factory},
+    ExtraDepositCost,
 };
 
 impl TokenTransferExecutionContext for TransferModule {
@@ -62,6 +63,7 @@ impl TokenTransferExecutionContext for TransferModule {
                     to.0.clone(),
                     U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
                 );
+            ExtraDepositCost::add(1);
         } else {
             panic!("Neither sender nor receiver is an escrow account. This should not happen.");
         }
@@ -89,6 +91,7 @@ impl TokenTransferExecutionContext for TransferModule {
                 account.0.clone(),
                 U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
             );
+        ExtraDepositCost::add(utils::STORAGE_DEPOSIT_FOR_MINT_TOKEN);
         Ok(())
     }
 

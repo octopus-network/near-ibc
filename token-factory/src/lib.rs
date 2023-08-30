@@ -11,6 +11,7 @@ use near_sdk::{
 use utils::{
     interfaces::{ext_wrapped_token, TokenFactory},
     types::AssetDenom,
+    ExtraDepositCost,
 };
 
 #[derive(BorshSerialize, BorshStorageKey)]
@@ -44,8 +45,6 @@ impl Contract {
     }
 }
 
-utils::impl_storage_check_and_refund!(Contract);
-
 #[near_bindgen]
 impl TokenFactory for Contract {
     #[payable]
@@ -70,6 +69,7 @@ impl TokenFactory for Contract {
             minimum_deposit
         );
         let used_bytes = env::storage_usage();
+        ExtraDepositCost::reset();
         if !self.denom_mappings.contains_key(&asset_denom) {
             // Generate asset id.
             let mut asset_id =
@@ -126,6 +126,7 @@ impl TokenFactory for Contract {
                     0,
                     utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
                 );
+            ExtraDepositCost::add(utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT);
             // Store mappings.
             self.asset_id_mappings
                 .insert(asset_id.clone(), asset_denom.clone());
@@ -133,10 +134,7 @@ impl TokenFactory for Contract {
                 .insert(asset_denom.clone(), asset_id.clone());
         }
         // Refund unused deposit.
-        utils::refund_deposit(
-            used_bytes,
-            env::attached_deposit() - utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT,
-        );
+        utils::refund_deposit(used_bytes);
     }
 
     #[payable]
@@ -156,7 +154,6 @@ impl TokenFactory for Contract {
             self.denom_mappings.contains_key(&asset_denom),
             "ERR_ASSET_NEEDS_TO_BE_SETUP"
         );
-        let used_bytes = env::storage_usage();
         // Mint tokens.
         let asset_id = self.denom_mappings.get(&asset_denom).unwrap();
         let token_contract_id: AccountId = format!("{}.{}", asset_id, env::current_account_id())
@@ -167,7 +164,6 @@ impl TokenFactory for Contract {
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 3)
             .with_unused_gas_weight(0)
             .mint(token_owner, amount);
-        utils::refund_deposit(used_bytes, env::attached_deposit());
     }
 }
 

@@ -38,7 +38,7 @@ use near_sdk::{
     serde::{Deserialize, Serialize},
     serde_json,
     store::LookupMap,
-    AccountId, BorshStorageKey, PanicOnDefault, Promise,
+    AccountId, BorshStorageKey, PanicOnDefault,
 };
 use utils::{
     interfaces::{
@@ -46,6 +46,7 @@ use utils::{
         ext_token_factory, TransferRequestHandler,
     },
     types::{AssetDenom, Ics20TransferRequest},
+    ExtraDepositCost,
 };
 
 mod collections;
@@ -133,6 +134,7 @@ impl Contract {
             utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG
         );
         let used_bytes = env::storage_usage();
+        ExtraDepositCost::reset();
         // Deliver messages to `ibc-rs`
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
 
@@ -149,10 +151,10 @@ impl Contract {
         if errors.len() > 0 {
             log!("Error(s) occurred: {:?}", errors);
         }
+        near_ibc_store.flush();
         self.near_ibc_store.set(&near_ibc_store);
-
         // Refund unused deposit.
-        utils::refund_deposit(used_bytes, env::attached_deposit());
+        utils::refund_deposit(used_bytes);
     }
     // Assert that the caller is the preset governance account.
     fn assert_governance(&self) {
@@ -191,8 +193,9 @@ impl Contract {
             minimum_deposit
         );
         let used_bytes = env::storage_usage();
+        ExtraDepositCost::reset();
         ext_token_factory::ext(utils::get_token_factory_contract_id())
-            .with_attached_deposit(env::attached_deposit())
+            .with_attached_deposit(minimum_deposit)
             .with_static_gas(
                 utils::GAS_FOR_COMPLEX_FUNCTION_CALL - utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
             )
@@ -204,7 +207,8 @@ impl Contract {
                 asset_denom.base_denom,
                 metadata,
             );
-        utils::refund_deposit(used_bytes, env::attached_deposit() - minimum_deposit)
+        ExtraDepositCost::add(minimum_deposit);
+        utils::refund_deposit(used_bytes);
     }
     /// Set the max length of the IBC events history queue.
     ///
@@ -233,14 +237,16 @@ impl Contract {
             minimum_deposit
         );
         let used_bytes = env::storage_usage();
+        ExtraDepositCost::reset();
         ext_escrow_factory::ext(utils::get_escrow_factory_contract_id())
-            .with_attached_deposit(env::attached_deposit())
+            .with_attached_deposit(minimum_deposit)
             .with_static_gas(
                 utils::GAS_FOR_COMPLEX_FUNCTION_CALL - utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
             )
             .with_unused_gas_weight(0)
             .create_escrow(ChannelId::from_str(channel_id.as_str()).unwrap());
-        utils::refund_deposit(used_bytes, env::attached_deposit() - minimum_deposit);
+        ExtraDepositCost::add(minimum_deposit);
+        utils::refund_deposit(used_bytes);
     }
     /// Register the given token contract for the given channel.
     ///
@@ -261,18 +267,18 @@ impl Contract {
             minimum_deposit
         );
         let used_bytes = env::storage_usage();
+        ExtraDepositCost::reset();
         let escrow_account_id =
             format!("{}.{}", channel_id, utils::get_escrow_factory_contract_id());
         ext_channel_escrow::ext(AccountId::from_str(escrow_account_id.as_str()).unwrap())
-            .with_attached_deposit(env::attached_deposit())
+            .with_attached_deposit(minimum_deposit)
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
             .with_unused_gas_weight(0)
             .register_asset(denom, token_contract);
-        utils::refund_deposit(used_bytes, env::attached_deposit() - minimum_deposit);
+        ExtraDepositCost::add(minimum_deposit);
+        utils::refund_deposit(used_bytes);
     }
 }
-
-utils::impl_storage_check_and_refund!(Contract);
 
 #[near_bindgen]
 impl TransferRequestHandler for Contract {
@@ -300,9 +306,7 @@ impl TransferRequestHandler for Contract {
                     receiver: Signer::from(transfer_request.receiver.clone()),
                     memo: Memo::from_str("").unwrap(),
                 },
-                timeout_height_on_b: TimeoutHeight::At(
-                    Height::new(0, env::block_height() + 1000).unwrap(),
-                ),
+                timeout_height_on_b: TimeoutHeight::Never {},
                 timeout_timestamp_on_b: Timestamp::from_nanoseconds(
                     env::block_timestamp() + 1000 * 1000000000,
                 )

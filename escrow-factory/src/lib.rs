@@ -26,7 +26,7 @@ use near_sdk::{
     store::UnorderedSet,
     AccountId, BorshStorageKey, PanicOnDefault, Promise,
 };
-use utils::interfaces::EscrowFactory;
+use utils::{interfaces::EscrowFactory, ExtraDepositCost};
 
 #[derive(BorshSerialize, BorshStorageKey)]
 pub enum StorageKey {
@@ -62,6 +62,7 @@ impl EscrowFactory for Contract {
     fn create_escrow(&mut self, channel_id: ChannelId) {
         utils::assert_ancestor_account();
         let used_bytes = env::storage_usage();
+        ExtraDepositCost::reset();
         if !self.channel_id_set.contains(&channel_id) {
             let escrow_contract_id: AccountId =
                 format!("{}.{}", channel_id, env::current_account_id())
@@ -90,16 +91,12 @@ impl EscrowFactory for Contract {
                     0,
                     utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
                 );
+            ExtraDepositCost::add(utils::INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT);
             self.channel_id_set.insert(channel_id);
         }
-        utils::refund_deposit(
-            used_bytes,
-            env::attached_deposit() - utils::INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT,
-        );
+        utils::refund_deposit(used_bytes);
     }
 }
-
-utils::impl_storage_check_and_refund!(Contract);
 
 /// Stores attached data into blob store and returns hash of it.
 /// Implemented to avoid loading the data into WASM for optimal gas usage.

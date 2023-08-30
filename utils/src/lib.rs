@@ -13,15 +13,12 @@ extern crate alloc;
 use core::str::FromStr;
 use ibc::applications::transfer::PORT_ID_STR;
 use near_sdk::{
-    env,
-    json_types::{U128, U64},
-    serde::{Deserialize, Serialize},
-    AccountId, Balance, Gas, Promise,
+    borsh::{self, BorshDeserialize, BorshSerialize},
+    env, AccountId, Balance, Gas, Promise,
 };
 use prelude::*;
 
 pub mod interfaces;
-mod macros;
 mod prelude;
 pub mod types;
 
@@ -40,6 +37,37 @@ pub const INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT: Balance = 3_500_000_000_000_0
 /// Initial balance for the channel escrow to cover storage deposit.
 pub const INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT: Balance = 3_000_000_000_000_000_000_000_000;
 
+const STORAGE_KEY_FOR_EXTRA_DEPOSIT_COST: &[u8] = b"extra_deposit_cost";
+
+#[derive(BorshSerialize, BorshDeserialize)]
+pub struct ExtraDepositCost(u128);
+
+impl ExtraDepositCost {
+    /// Reset the extra deposit cost to 0.
+    pub fn reset() {
+        env::storage_write(
+            STORAGE_KEY_FOR_EXTRA_DEPOSIT_COST,
+            &Self(0).try_to_vec().unwrap(),
+        );
+    }
+    /// Add the extra deposit cost.
+    pub fn add(cost: u128) {
+        let mut extra_deposit_cost = Self::get();
+        extra_deposit_cost.0 += cost;
+        env::storage_write(
+            STORAGE_KEY_FOR_EXTRA_DEPOSIT_COST,
+            &cost.try_to_vec().unwrap(),
+        );
+    }
+    /// Get the extra deposit cost.
+    pub fn get() -> Self {
+        match env::storage_read(STORAGE_KEY_FOR_EXTRA_DEPOSIT_COST) {
+            Some(bytes) => Self::try_from_slice(&bytes).unwrap(),
+            None => Self(0),
+        }
+    }
+}
+
 /// Check the usage of storage of current account and refund the unused attached deposit.
 ///
 /// For calling this function, at least `GAS_FOR_CHECK_STORAGE_AND_REFUND` gas is needed.
@@ -47,27 +75,27 @@ pub const INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT: Balance = 3_000_000_000_000_
 ///
 /// Better to call this function at the end of a `payable` function
 /// by recording the `previously_used_bytes` at the start of the `payable` function.
-pub fn refund_deposit(previously_used_bytes: u64, max_refundable_amount: u128) {
-    #[derive(Serialize, Deserialize, Clone)]
-    #[serde(crate = "near_sdk::serde")]
-    struct Input {
-        pub caller: AccountId,
-        pub max_refundable_amount: U128,
-        pub previously_used_bytes: U64,
+pub fn refund_deposit(previously_used_bytes: u64) {
+    let mut refund_amount = env::attached_deposit();
+    let extra_deposit_cost = ExtraDepositCost::get().0;
+    if env::storage_usage() > previously_used_bytes || extra_deposit_cost > 0 {
+        let storage_increment = match env::storage_usage() > previously_used_bytes {
+            true => env::storage_usage() - previously_used_bytes,
+            false => 0,
+        };
+        near_sdk::log!(
+            "Storage increment: {}, extra deposit cost: {}",
+            storage_increment,
+            extra_deposit_cost
+        );
+        let cost = env::storage_byte_cost() * storage_increment as u128 + extra_deposit_cost;
+        if cost >= refund_amount {
+            return;
+        } else {
+            refund_amount -= cost;
+        }
     }
-    let args = Input {
-        caller: env::predecessor_account_id(),
-        max_refundable_amount: U128(max_refundable_amount),
-        previously_used_bytes: U64(previously_used_bytes),
-    };
-    let args = near_sdk::serde_json::to_vec(&args)
-        .expect("ERR_SERIALIZE_ARGS_OF_CHECK_STORAGE_AND_REFUND");
-    Promise::new(env::current_account_id()).function_call(
-        "check_storage_and_refund".to_string(),
-        args,
-        0,
-        GAS_FOR_SIMPLE_FUNCTION_CALL,
-    );
+    Promise::new(env::predecessor_account_id()).transfer(refund_amount);
 }
 
 /// Asserts that the predecessor account is the root account.

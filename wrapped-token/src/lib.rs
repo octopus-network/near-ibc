@@ -11,7 +11,6 @@
 extern crate alloc;
 
 use alloc::{
-    format,
     string::{String, ToString},
     vec,
     vec::Vec,
@@ -182,7 +181,6 @@ impl Contract {
 
 near_contract_standards::impl_fungible_token_core!(Contract, token);
 near_contract_standards::impl_fungible_token_storage!(Contract, token);
-utils::impl_storage_check_and_refund!(Contract);
 
 #[near_bindgen]
 impl WrappedToken for Contract {
@@ -192,7 +190,7 @@ impl WrappedToken for Contract {
         let used_bytes = env::storage_usage();
         self.storage_deposit(Some(account_id.clone()), None);
         self.token.internal_deposit(&account_id, amount.into());
-        utils::refund_deposit(used_bytes, env::attached_deposit());
+        utils::refund_deposit(used_bytes);
         FtMint {
             owner_id: &account_id,
             amount: &amount,
@@ -214,7 +212,7 @@ impl WrappedToken for Contract {
         metadata.icon = Some(icon);
         self.metadata.set(&metadata);
         // Refund the unused attached deposit.
-        utils::refund_deposit(used_bytes, env::attached_deposit());
+        utils::refund_deposit(used_bytes);
     }
 }
 

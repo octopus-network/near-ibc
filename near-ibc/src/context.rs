@@ -219,4 +219,17 @@ impl NearIbcStore {
     pub fn clear_ibc_events_history(&mut self) {
         self.ibc_events_history.clear();
     }
+    ///
+    pub fn flush(&mut self) {
+        self.client_id_set.flush();
+        self.client_processed_heights.flush();
+        self.client_processed_times.flush();
+        self.client_consensus_state_height_sets.flush();
+        self.connection_id_set.flush();
+        self.port_channel_id_set.flush();
+        self.packet_commitment_sequence_sets.flush();
+        self.packet_receipt_sequence_sets.flush();
+        self.packet_acknowledgement_sequence_sets.flush();
+        self.ibc_events_history.flush();
+    }
 }

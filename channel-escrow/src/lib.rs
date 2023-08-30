@@ -11,7 +11,6 @@
 extern crate alloc;
 
 use alloc::{
-    format,
     string::{String, ToString},
     vec,
     vec::Vec,
@@ -141,8 +140,6 @@ impl Contract {
             .map(|(denom, _)| denom.clone())
     }
 }
-
-utils::impl_storage_check_and_refund!(Contract);
 
 #[near_bindgen]
 impl ChannelEscrow for Contract {
