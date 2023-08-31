@@ -154,19 +154,28 @@ impl ChannelEscrow for Contract {
                 .any(|id| id == &token_contract),
             "ERR_TOKEN_CONTRACT_ALREADY_REGISTERED"
         );
+        let necessary_deposit =
+            env::storage_byte_cost() * (denom.len() + token_contract.to_string().len()) as u128;
+        assert!(
+            env::attached_deposit() == necessary_deposit,
+            "ERR_INVALID_ATTACHED_DEPOSIT, need {} yoctoNEAR",
+            necessary_deposit
+        );
         self.token_contracts.insert(denom, token_contract);
     }
 
+    #[payable]
     fn do_transfer(&mut self, base_denom: String, receiver_id: AccountId, amount: U128) {
         self.assert_near_ibc_account();
         assert!(
             self.token_contracts.contains_key(&base_denom),
             "ERR_INVALID_TOKEN_DENOM"
         );
+        near_sdk::assert_one_yocto();
         let token_contract = self.token_contracts.get(&base_denom).unwrap();
         ext_ft_core::ext(token_contract.clone())
             .with_attached_deposit(1)
-            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 2)
             .with_unused_gas_weight(0)
             .ft_transfer(receiver_id, amount.into(), None);
     }

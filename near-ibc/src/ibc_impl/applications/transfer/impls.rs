@@ -56,7 +56,7 @@ impl TokenTransferExecutionContext for TransferModule {
         } else if sender_id.ends_with(prefixed_ef.as_str()) {
             ext_channel_escrow::ext(from.0.clone())
                 .with_attached_deposit(1)
-                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
                 .with_unused_gas_weight(0)
                 .do_transfer(
                     base_denom,
