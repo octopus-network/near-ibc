@@ -95,8 +95,7 @@ impl ValidationContext for NearIbcStore {
     }
 
     fn host_height(&self) -> Result<Height, ContextError> {
-        Height::new(env::epoch_height(), env::block_height())
-            .map_err(|e| ContextError::ClientError(e))
+        Height::new(0, env::block_height()).map_err(|e| ContextError::ClientError(e))
     }
 
     fn host_timestamp(&self) -> Result<Timestamp, ContextError> {
