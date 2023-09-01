@@ -98,6 +98,13 @@ impl EscrowFactory for Contract {
     }
 }
 
+/// View functions.
+impl Contract {
+    pub fn get_channel_id_set(&self) -> Vec<ChannelId> {
+        self.channel_id_set.iter().map(|id| id.clone()).collect()
+    }
+}
+
 /// Stores attached data into blob store and returns hash of it.
 /// Implemented to avoid loading the data into WASM for optimal gas usage.
 #[no_mangle]

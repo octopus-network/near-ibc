@@ -41,6 +41,7 @@ impl TokenTransferExecutionContext for TransferModule {
     ) -> Result<(), TokenTransferError> {
         let sender_id = from.0.to_string();
         let receiver_id = to.0.to_string();
+        let trace_path = amt.denom.trace_path.to_string();
         let base_denom = amt.denom.base_denom.to_string();
         let prefixed_ef = format!(".ef.transfer.{}", env::current_account_id());
         if receiver_id.ends_with(prefixed_ef.as_str()) {
@@ -49,6 +50,7 @@ impl TokenTransferExecutionContext for TransferModule {
                 .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
                 .with_unused_gas_weight(0)
                 .apply_transfer_request(
+                    trace_path,
                     base_denom,
                     from.0.clone(),
                     U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
@@ -59,6 +61,7 @@ impl TokenTransferExecutionContext for TransferModule {
                 .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
                 .with_unused_gas_weight(0)
                 .do_transfer(
+                    trace_path,
                     base_denom,
                     to.0.clone(),
                     U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
@@ -111,6 +114,7 @@ impl TokenTransferExecutionContext for TransferModule {
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
             .with_unused_gas_weight(0)
             .apply_transfer_request(
+                amt.denom.trace_path.to_string(),
                 amt.denom.base_denom.to_string(),
                 account.0.clone(),
                 U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),

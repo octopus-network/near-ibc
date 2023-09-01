@@ -42,9 +42,15 @@ pub trait EscrowFactory {
 #[ext_contract(ext_channel_escrow)]
 pub trait ChannelEscrow {
     /// Register a token contract that this contract is allowed to send tokens to.
-    fn register_asset(&mut self, denom: String, token_contract: AccountId);
+    fn register_asset(&mut self, trace_path: String, base_denom: String, token_contract: AccountId);
     /// Send a certain amount of tokens to a certain account.
-    fn do_transfer(&mut self, base_denom: String, receiver_id: AccountId, amount: U128);
+    fn do_transfer(
+        &mut self,
+        trace_path: String,
+        base_denom: String,
+        receiver_id: AccountId,
+        amount: U128,
+    );
 }
 
 /// Interfaces for the token factory contract.
@@ -95,7 +101,13 @@ pub trait ProcessTransferRequestCallback {
     /// The calling is triggered by the IBC/TAO implementation, when all checkings
     /// are passed for a `send_transfer` request from this contract.
     /// The account id and amount must match the current pending transfer request.
-    fn apply_transfer_request(&mut self, base_denom: String, sender_id: AccountId, amount: U128);
+    fn apply_transfer_request(
+        &mut self,
+        trace_path: String,
+        base_denom: String,
+        sender_id: AccountId,
+        amount: U128,
+    );
     /// Cancel a certain pending transfer request.
     ///
     /// Only the `near-ibc` account can call this method.
@@ -103,5 +115,11 @@ pub trait ProcessTransferRequestCallback {
     /// The calling is triggered by the IBC/TAO implementation, when error happens
     /// in processing a `send_transfer` request from this contract.
     /// The account id and amount must match the current pending transfer request.
-    fn cancel_transfer_request(&mut self, base_denom: String, sender_id: AccountId, amount: U128);
+    fn cancel_transfer_request(
+        &mut self,
+        trace_path: String,
+        base_denom: String,
+        sender_id: AccountId,
+        amount: U128,
+    );
 }

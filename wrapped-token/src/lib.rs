@@ -163,6 +163,7 @@ impl Contract {
     /// Assert that the given account has a pending transfer request with the given amount.
     fn checked_remove_pending_transfer_request(
         &mut self,
+        trace_path: &String,
         base_denom: &String,
         account_id: &AccountId,
         amount: U128,
@@ -172,9 +173,12 @@ impl Contract {
             "ERR_NO_PENDING_TRANSFER_REQUEST"
         );
         let req = self.pending_transfer_requests.get(&account_id).unwrap();
-        if !self.base_denom.eq(base_denom) || req.amount != amount {
-            panic!("ERR_PENDING_TRANSFER_REQUEST_NOT_MATCHED")
-        }
+        assert!(
+            req.amount == amount
+                && req.token_denom.eq(base_denom)
+                && req.token_trace_path.eq(trace_path),
+            "ERR_PENDING_TRANSFER_REQUEST_NOT_MATCHED"
+        );
         self.pending_transfer_requests.remove(&account_id);
     }
 }
@@ -218,9 +222,15 @@ impl WrappedToken for Contract {
 
 #[near_bindgen]
 impl ProcessTransferRequestCallback for Contract {
-    fn apply_transfer_request(&mut self, base_denom: String, sender_id: AccountId, amount: U128) {
+    fn apply_transfer_request(
+        &mut self,
+        trace_path: String,
+        base_denom: String,
+        sender_id: AccountId,
+        amount: U128,
+    ) {
         self.assert_near_ibc_account();
-        self.checked_remove_pending_transfer_request(&base_denom, &sender_id, amount);
+        self.checked_remove_pending_transfer_request(&trace_path, &base_denom, &sender_id, amount);
         self.token
             .internal_withdraw(&env::current_account_id(), amount.into());
         FtBurn {
@@ -231,9 +241,15 @@ impl ProcessTransferRequestCallback for Contract {
         .emit()
     }
 
-    fn cancel_transfer_request(&mut self, base_denom: String, sender_id: AccountId, amount: U128) {
+    fn cancel_transfer_request(
+        &mut self,
+        trace_path: String,
+        base_denom: String,
+        sender_id: AccountId,
+        amount: U128,
+    ) {
         self.assert_near_ibc_account();
-        self.checked_remove_pending_transfer_request(&base_denom, &sender_id, amount);
+        self.checked_remove_pending_transfer_request(&trace_path, &base_denom, &sender_id, amount);
         self.token
             .internal_withdraw(&env::current_account_id(), amount.into());
         self.token.internal_deposit(&sender_id, amount.into());

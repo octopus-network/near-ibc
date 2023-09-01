@@ -257,12 +257,17 @@ impl Contract {
     pub fn register_asset_for_channel(
         &mut self,
         channel_id: String,
-        denom: String,
+        trace_path: String,
+        base_denom: String,
         token_contract: AccountId,
     ) {
         self.assert_governance();
-        let minimum_deposit =
-            env::storage_byte_cost() * (denom.len() + token_contract.to_string().len()) as u128;
+        let asset_denom = AssetDenom {
+            trace_path,
+            base_denom,
+        };
+        let minimum_deposit = env::storage_byte_cost()
+            * (asset_denom.try_to_vec().unwrap().len() + token_contract.to_string().len()) as u128;
         assert!(
             env::attached_deposit() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
@@ -276,7 +281,11 @@ impl Contract {
             .with_attached_deposit(minimum_deposit)
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
             .with_unused_gas_weight(0)
-            .register_asset(denom, token_contract);
+            .register_asset(
+                asset_denom.trace_path,
+                asset_denom.base_denom,
+                token_contract,
+            );
         ExtraDepositCost::add(minimum_deposit);
         utils::refund_deposit(used_bytes);
     }
@@ -328,6 +337,7 @@ impl TransferRequestHandler for Contract {
                 .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
                 .with_unused_gas_weight(0)
                 .cancel_transfer_request(
+                    transfer_request.token_trace_path,
                     transfer_request.token_denom,
                     AccountId::from_str(transfer_request.sender.as_str()).unwrap(),
                     transfer_request.amount,
@@ -365,7 +375,8 @@ impl Contract {
     pub fn cancel_transfer_request_in_channel_escrow(
         &mut self,
         channel_id: String,
-        token_denom: String,
+        trace_path: String,
+        base_denom: String,
         sender_id: AccountId,
         amount: U128,
     ) {
@@ -378,7 +389,7 @@ impl Contract {
         .with_attached_deposit(0)
         .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
         .with_unused_gas_weight(0)
-        .cancel_transfer_request(token_denom, sender_id, amount);
+        .cancel_transfer_request(trace_path, base_denom, sender_id, amount);
     }
 }
 

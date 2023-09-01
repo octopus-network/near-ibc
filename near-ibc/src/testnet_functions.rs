@@ -103,6 +103,7 @@ impl Contract {
     ///
     pub fn remove_client(&mut self, client_id: ClientId) {
         assert_testnet();
+        self.assert_governance();
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store.remove_client(&client_id);
         self.near_ibc_store.set(&near_ibc_store);

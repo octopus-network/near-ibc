@@ -5,7 +5,10 @@ use near_sdk::{
     serde::{Deserialize, Serialize},
 };
 
-#[derive(BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(
+    BorshDeserialize, BorshSerialize, Clone, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(crate = "near_sdk::serde")]
 pub struct AssetDenom {
     pub trace_path: String,
     pub base_denom: String,
