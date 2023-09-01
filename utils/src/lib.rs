@@ -56,7 +56,7 @@ impl ExtraDepositCost {
         extra_deposit_cost.0 += cost;
         env::storage_write(
             STORAGE_KEY_FOR_EXTRA_DEPOSIT_COST,
-            &cost.try_to_vec().unwrap(),
+            &extra_deposit_cost.try_to_vec().unwrap(),
         );
     }
     /// Get the extra deposit cost.
