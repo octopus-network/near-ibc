@@ -46,7 +46,7 @@ use utils::{
         ext_channel_escrow, ext_escrow_factory, ext_process_transfer_request_callback,
         ext_token_factory, TransferRequestHandler,
     },
-    types::{AssetDenom, Ics20TransferRequest},
+    types::{AssetDenom, CrossChainAsset, Ics20TransferRequest},
     ExtraDepositCost,
 };
 
@@ -61,7 +61,7 @@ mod testnet_functions;
 pub mod types;
 pub mod viewer;
 
-pub const VERSION: &str = "v1.0.0-pre.3";
+pub const VERSION: &str = "v1.0.0-pre.4";
 
 #[derive(BorshDeserialize, BorshSerialize, BorshStorageKey, Clone)]
 pub enum StorageKey {
@@ -181,11 +181,17 @@ impl Contract {
             "ERR_NOT_ENOUGH_GAS"
         );
         let asset_denom = AssetDenom {
-            trace_path,
-            base_denom,
+            trace_path: trace_path.clone(),
+            base_denom: base_denom.clone(),
+        };
+        let cross_chain_asset = CrossChainAsset {
+            asset_id: "00000000000000000000000000000000".to_string(),
+            asset_denom: asset_denom.clone(),
+            metadata: metadata.clone(),
         };
         let minimum_deposit = utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT
-            + env::storage_byte_cost() * (asset_denom.try_to_vec().unwrap().len() + 32) as u128 * 2;
+            + env::storage_byte_cost()
+                * (32 + cross_chain_asset.try_to_vec().unwrap().len()) as u128;
         assert!(
             env::attached_deposit() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",

@@ -10,7 +10,7 @@ use near_sdk::{
 };
 use utils::{
     interfaces::{ext_wrapped_token, TokenFactory},
-    types::AssetDenom,
+    types::{AssetDenom, CrossChainAsset},
     ExtraDepositCost,
 };
 
@@ -18,14 +18,6 @@ use utils::{
 pub enum StorageKey {
     TokenContractWasm,
     AssetIdMappings,
-}
-
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone)]
-#[serde(crate = "near_sdk::serde")]
-pub struct CrossChainAsset {
-    pub asset_id: String,
-    pub asset_denom: AssetDenom,
-    pub metadata: FungibleTokenMetadata,
 }
 
 #[near_bindgen]

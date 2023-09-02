@@ -30,6 +30,8 @@ use near_sdk::{
 };
 
 pub trait Viewer {
+    /// Show the version of the contract.
+    fn version(&self) -> String;
     /// Get the latest height of the host chain.
     fn get_latest_height(&self) -> Height;
     /// Get the connection end associated with the given connection identifier.
@@ -109,6 +111,10 @@ pub trait Viewer {
 
 #[near_bindgen]
 impl Viewer for Contract {
+    fn version(&self) -> String {
+        VERSION.to_string()
+    }
+
     fn get_latest_height(&self) -> Height {
         Height::new(0, env::block_height()).unwrap()
     }
