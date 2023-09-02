@@ -171,8 +171,6 @@ impl Contract {
     #[payable]
     pub fn setup_wrapped_token(
         &mut self,
-        port_id: String,
-        channel_id: String,
         trace_path: String,
         base_denom: String,
         metadata: FungibleTokenMetadata,
@@ -201,13 +199,7 @@ impl Contract {
                 utils::GAS_FOR_COMPLEX_FUNCTION_CALL - utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
             )
             .with_unused_gas_weight(0)
-            .setup_asset(
-                port_id,
-                channel_id,
-                asset_denom.trace_path,
-                asset_denom.base_denom,
-                metadata,
-            );
+            .setup_asset(asset_denom.trace_path, asset_denom.base_denom, metadata);
         ExtraDepositCost::add(minimum_deposit);
         utils::refund_deposit(used_bytes);
     }

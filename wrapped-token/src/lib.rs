@@ -55,10 +55,6 @@ pub struct Contract {
     token: FungibleToken,
     /// The metadata of the token.
     metadata: LazyOption<FungibleTokenMetadata>,
-    /// The port id of the token, in ICS-20 of IBC protocol.
-    port_id: String,
-    /// The channel id of the token, in ICS-20 of IBC protocol.
-    channel_id: String,
     /// The trace path of the token, in ICS-20 of IBC protocol.
     trace_path: String,
     /// The base denom of the token, in ICS-20 of IBC protocol.
@@ -74,8 +70,6 @@ impl Contract {
     #[init]
     pub fn new(
         metadata: FungibleTokenMetadata,
-        port_id: String,
-        channel_id: String,
         trace_path: String,
         base_denom: String,
         near_ibc_account: AccountId,
@@ -96,8 +90,6 @@ impl Contract {
         let mut this = Self {
             token: FungibleToken::new(StorageKey::Token),
             metadata: LazyOption::new(StorageKey::Metadata, Some(&metadata)),
-            port_id,
-            channel_id,
             trace_path,
             base_denom,
             near_ibc_account,
@@ -113,7 +105,13 @@ impl Contract {
     /// This function is called by a certain token holder, when he/she wants to redeem
     /// the token on NEAR protocol back to the source chain. It will send
     /// a transfer plan to the IBC/TAO implementation.
-    pub fn request_transfer(&mut self, receiver_id: String, amount: U128) {
+    pub fn request_transfer(
+        &mut self,
+        source_port_id: String,
+        source_channel_id: String,
+        receiver_id: String,
+        amount: U128,
+    ) {
         assert!(amount.0 > 0, "ERR_AMOUNT_MUST_BE_GREATER_THAN_ZERO");
         let sender_id = env::predecessor_account_id();
         assert!(
@@ -126,8 +124,8 @@ impl Contract {
         );
         // Schedule a call to `process_transfer_request` on `near-ibc` contract.
         let transfer_request = Ics20TransferRequest {
-            port_on_a: self.port_id.clone(),
-            chan_on_a: self.channel_id.clone(),
+            port_on_a: source_port_id,
+            chan_on_a: source_channel_id,
             token_trace_path: self.trace_path.clone(),
             token_denom: self.base_denom.clone(),
             amount,

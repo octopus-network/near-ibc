@@ -59,8 +59,6 @@ pub trait TokenFactory {
     /// Create and initialize a new token contract.
     fn setup_asset(
         &mut self,
-        port_id: String,
-        channel_id: String,
         trace_path: String,
         base_denom: String,
         metadata: FungibleTokenMetadata,
