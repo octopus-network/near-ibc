@@ -170,9 +170,14 @@ impl TokenFactory for Contract {
 }
 
 /// View functions.
+pub trait Viewer {
+    /// Get all cross chain assets.
+    fn get_cross_chain_assets(&self) -> Vec<CrossChainAsset>;
+}
+
 #[near_bindgen]
-impl Contract {
-    pub fn get_cross_chain_assets(&self) -> Vec<CrossChainAsset> {
+impl Viewer for Contract {
+    fn get_cross_chain_assets(&self) -> Vec<CrossChainAsset> {
         let mut assets = Vec::new();
         for asset in self.asset_id_mappings.values() {
             assets.push(asset.clone());

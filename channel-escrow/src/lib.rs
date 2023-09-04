@@ -269,10 +269,22 @@ impl NearIbcAccountAssertion for Contract {
 }
 
 /// View functions.
+pub trait Viewer {
+    /// Get all registered assets.
+    fn get_registered_assets(&self) -> Vec<RegisteredAsset>;
+    /// Get all pending accounts.
+    fn get_pending_accounts(&self) -> Vec<AccountId>;
+    /// Get pending transfer request of the given account.
+    fn get_pending_transfer_request_of(
+        &self,
+        account_id: AccountId,
+    ) -> Option<Ics20TransferRequest>;
+}
+
 #[near_bindgen]
-impl Contract {
+impl Viewer for Contract {
     ///
-    pub fn get_registered_assets(&self) -> Vec<RegisteredAsset> {
+    fn get_registered_assets(&self) -> Vec<RegisteredAsset> {
         self.token_contracts
             .iter()
             .map(|(token_contract, asset_denom)| RegisteredAsset {
@@ -282,14 +294,14 @@ impl Contract {
             .collect()
     }
     ///
-    pub fn get_pending_accounts(&self) -> Vec<AccountId> {
+    fn get_pending_accounts(&self) -> Vec<AccountId> {
         self.pending_transfer_requests
             .keys()
             .map(|account_id| account_id.clone())
             .collect()
     }
     ///
-    pub fn get_pending_transfer_request_of(
+    fn get_pending_transfer_request_of(
         &self,
         account_id: AccountId,
     ) -> Option<Ics20TransferRequest> {

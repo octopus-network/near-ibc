@@ -99,8 +99,14 @@ impl EscrowFactory for Contract {
 }
 
 /// View functions.
-impl Contract {
-    pub fn get_channel_id_set(&self) -> Vec<ChannelId> {
+pub trait Viewer {
+    /// Get all channel ids on which the escrow contract is deployed.
+    fn get_channel_id_set(&self) -> Vec<ChannelId>;
+}
+
+#[near_bindgen]
+impl Viewer for Contract {
+    fn get_channel_id_set(&self) -> Vec<ChannelId> {
         self.channel_id_set.iter().map(|id| id.clone()).collect()
     }
 }
