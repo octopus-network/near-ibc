@@ -41,8 +41,8 @@ pub trait EscrowFactory {
 /// Interfaces for the channel escrow contracts.
 #[ext_contract(ext_channel_escrow)]
 pub trait ChannelEscrow {
-    /// Register a token contract that this contract is allowed to send tokens to.
-    fn register_asset(&mut self, trace_path: String, base_denom: String, token_contract: AccountId);
+    /// Register a token contract which is allowed to send tokens to this contract.
+    fn register_asset(&mut self, base_denom: String, token_contract: AccountId);
     /// Send a certain amount of tokens to a certain account.
     fn do_transfer(
         &mut self,

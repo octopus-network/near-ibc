@@ -156,15 +156,10 @@ impl Contract {
 #[near_bindgen]
 impl ChannelEscrow for Contract {
     #[payable]
-    fn register_asset(
-        &mut self,
-        trace_path: String,
-        base_denom: String,
-        token_contract: AccountId,
-    ) {
+    fn register_asset(&mut self, base_denom: String, token_contract: AccountId) {
         self.assert_near_ibc_account();
         let asset_denom = AssetDenom {
-            trace_path,
+            trace_path: String::new(),
             base_denom,
         };
         let maybe_existed_token_contract = self.get_token_contract_by_asset_denom(&asset_denom);

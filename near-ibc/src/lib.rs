@@ -255,13 +255,20 @@ impl Contract {
     pub fn register_asset_for_channel(
         &mut self,
         channel_id: String,
-        trace_path: String,
         base_denom: String,
         token_contract: AccountId,
     ) {
         self.assert_governance();
+        let prefixed_base_account = format!(".{}", env::current_account_id());
+        assert!(
+            !token_contract
+                .to_string()
+                .ends_with(prefixed_base_account.as_str()),
+            "ERR_INVALID_TOKEN_CONTRACT_ACCOUNT, \
+            must not be the cross chain assets received by near-ibc."
+        );
         let asset_denom = AssetDenom {
-            trace_path,
+            trace_path: String::new(),
             base_denom,
         };
         let minimum_deposit = env::storage_byte_cost()
@@ -279,11 +286,7 @@ impl Contract {
             .with_attached_deposit(minimum_deposit)
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
             .with_unused_gas_weight(0)
-            .register_asset(
-                asset_denom.trace_path,
-                asset_denom.base_denom,
-                token_contract,
-            );
+            .register_asset(asset_denom.base_denom, token_contract);
         ExtraDepositCost::add(minimum_deposit);
         utils::refund_deposit(used_bytes);
     }

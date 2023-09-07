@@ -10,11 +10,14 @@
 
 extern crate alloc;
 
+use core::str::FromStr;
+
 use alloc::{
     string::{String, ToString},
     vec,
     vec::Vec,
 };
+use ibc::applications::transfer::TracePath;
 use near_contract_standards::fungible_token::{
     events::{FtBurn, FtMint},
     metadata::{FungibleTokenMetadata, FungibleTokenMetadataProvider},
@@ -87,6 +90,15 @@ impl Contract {
                 .ends_with(near_ibc_account.as_str()),
             "ERR_NEAR_IBC_ACCOUNT_MUST_HAVE_THE_SAME_ROOT_ACOUNT_AS_CURRENT_ACCOUNT"
         );
+        let maybe_trace_path =
+            TracePath::from_str(trace_path.as_str()).expect("ERR_INVALID_TRACE_PATH");
+        // As this contract will only be initialized by the first time a cross chain asset
+        // is received by `near-ibc`, the trace path will at least have 1 trace prefix
+        // which is composed of the receiving port id and receiving channel id.
+        assert!(
+            !maybe_trace_path.is_empty(),
+            "ERR_TRACE_PATH_MUST_NOT_BE_EMPTY"
+        );
         let mut this = Self {
             token: FungibleToken::new(StorageKey::Token),
             metadata: LazyOption::new(StorageKey::Metadata, Some(&metadata)),
@@ -105,13 +117,7 @@ impl Contract {
     /// This function is called by a certain token holder, when he/she wants to redeem
     /// the token on NEAR protocol back to the source chain. It will send
     /// a transfer plan to the IBC/TAO implementation.
-    pub fn request_transfer(
-        &mut self,
-        source_port_id: String,
-        source_channel_id: String,
-        receiver_id: String,
-        amount: U128,
-    ) {
+    pub fn request_transfer(&mut self, receiver_id: String, amount: U128) {
         assert!(amount.0 > 0, "ERR_AMOUNT_MUST_BE_GREATER_THAN_ZERO");
         let sender_id = env::predecessor_account_id();
         assert!(
@@ -122,10 +128,14 @@ impl Contract {
             !self.pending_transfer_requests.contains_key(&sender_id),
             "ERR_PENDING_TRANSFER_REQUEST_EXISTS"
         );
+        let trace_path_parts: Vec<&str> = self.trace_path.split('/').collect();
         // Schedule a call to `process_transfer_request` on `near-ibc` contract.
+        // As the `self.trace_path` is already validated in the constructor,
+        // we can safely use the first 2 parts of `self.trace_path` as the source port id
+        // and source channel id.
         let transfer_request = Ics20TransferRequest {
-            port_on_a: source_port_id,
-            chan_on_a: source_channel_id,
+            port_on_a: trace_path_parts[0].to_string(),
+            chan_on_a: trace_path_parts[1].to_string(),
             token_trace_path: self.trace_path.clone(),
             token_denom: self.base_denom.clone(),
             amount,
