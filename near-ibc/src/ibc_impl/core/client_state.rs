@@ -1,6 +1,6 @@
 use super::consensus_state::AnyConsensusState;
 use crate::{collections::IndexedAscendingQueueViewer, context::NearIbcStore, prelude::*};
-use core::time::Duration;
+use ibc::core::ics02_client::client_state::Status;
 use ibc::{
     clients::ics07_tendermint::client_state::ClientState as TmClientState,
     core::{
@@ -29,7 +29,7 @@ use ibc_proto::{
     },
     protobuf::Protobuf,
 };
-use ics06_solomachine::v3::client_state::ClientState as SmClientState;
+use ics06_solomachine::client_state::ClientState as SmClientState;
 use serde::{Deserialize, Serialize};
 
 const TENDERMINT_CLIENT_STATE_TYPE_URL: &str = "/ibc.lightclients.tendermint.v1.ClientState";
@@ -118,6 +118,12 @@ impl ClientStateValidation<NearIbcStore> for AnyClientState {
             }
         }
     }
+    fn status(&self, ctx: &NearIbcStore, client_id: &ClientId) -> Result<Status, ClientError> {
+        match self {
+            AnyClientState::Tendermint(client_state) => client_state.status(ctx, client_id),
+            AnyClientState::Solomachine(client_state) => client_state.status(ctx, client_id),
+        }
+    }
 }
 
 impl ClientStateCommon for AnyClientState {
@@ -154,20 +160,6 @@ impl ClientStateCommon for AnyClientState {
             AnyClientState::Solomachine(client_state) => {
                 client_state.validate_proof_height(proof_height)
             }
-        }
-    }
-
-    fn confirm_not_frozen(&self) -> Result<(), ClientError> {
-        match self {
-            AnyClientState::Tendermint(client_state) => client_state.confirm_not_frozen(),
-            AnyClientState::Solomachine(client_state) => client_state.confirm_not_frozen(),
-        }
-    }
-
-    fn expired(&self, elapsed: Duration) -> bool {
-        match self {
-            AnyClientState::Tendermint(client_state) => client_state.expired(elapsed),
-            AnyClientState::Solomachine(client_state) => client_state.expired(elapsed),
         }
     }
 
@@ -382,7 +374,7 @@ impl ibc::clients::ics07_tendermint::ValidationContext for NearIbcStore {
     }
 }
 
-impl ics06_solomachine::v3::CommonContext for NearIbcStore {
+impl ics06_solomachine::CommonContext for NearIbcStore {
     type ConversionError = ClientError;
 
     type AnyConsensusState = AnyConsensusState;
@@ -395,7 +387,7 @@ impl ics06_solomachine::v3::CommonContext for NearIbcStore {
     }
 }
 
-impl ics06_solomachine::v3::ValidationContext for NearIbcStore {
+impl ics06_solomachine::ValidationContext for NearIbcStore {
     fn host_timestamp(&self) -> Result<Timestamp, ContextError> {
         ValidationContext::host_timestamp(self)
     }

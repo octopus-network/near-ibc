@@ -181,6 +181,11 @@ impl SendPacketValidationContext for TransferModule {
 
     type AnyClientState = AnyClientState;
 
+    /// Retrieve the context that implements all clients' `ValidationContext`.
+    fn get_client_validation_context(&self) -> &Self::ClientValidationContext {
+        todo!()
+    }
+
     fn channel_end(&self, channel_end_path: &ChannelEndPath) -> Result<ChannelEnd, ContextError> {
         let store = Self::get_near_ibc_store();
         ValidationContext::channel_end(&store, channel_end_path)
@@ -237,15 +242,17 @@ impl SendPacketExecutionContext for TransferModule {
         result
     }
 
-    fn emit_ibc_event(&mut self, event: ibc::core::events::IbcEvent) {
+    fn emit_ibc_event(&mut self, event: ibc::core::events::IbcEvent) -> Result<(), ContextError> {
         let mut store = Self::get_near_ibc_store();
-        ExecutionContext::emit_ibc_event(&mut store, event);
+        ExecutionContext::emit_ibc_event(&mut store, event)?;
         Self::set_near_ibc_store(&store);
+        Ok(())
     }
 
-    fn log_message(&mut self, message: String) {
+    fn log_message(&mut self, message: String) -> Result<(), ContextError> {
         let mut store = Self::get_near_ibc_store();
-        ExecutionContext::log_message(&mut store, message);
+        ExecutionContext::log_message(&mut store, message)?;
         Self::set_near_ibc_store(&store);
+        Ok(())
     }
 }

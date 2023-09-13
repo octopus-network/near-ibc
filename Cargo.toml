@@ -7,6 +7,7 @@ members = [
     "utils",
     "wrapped-token",
 ]
+resolver = "2"
 
 [profile.release]
 codegen-units = 1
@@ -18,6 +19,6 @@ panic = "abort"
 overflow-checks = true
 
 [patch.crates-io]
-ibc = { git = "https://github.com/octopus-network/ibc-rs.git", branch = "octopus-relayer-v0.42.0" }
-ibc-proto = { git = "https://github.com/octopus-network/ibc-proto-rs.git", branch = "octopus-relayer-v0.32.0" }
-ics23 = { git = "https://github.com/octopus-network/ics23.git", branch = "for-near-ibc-pre2" }
+ibc = { git = "https://github.com/octopus-network/ibc-rs.git", branch = "octopus-relayer" }
+ibc-proto = { git = "https://github.com/octopus-network/ibc-proto-rs.git", branch = "octopus-relayer" }
+# ics23 = { git = "https://github.com/octopus-network/ics23.git", branch = "for-near-ibc-pre2" }

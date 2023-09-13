@@ -15,7 +15,7 @@ use ibc_proto::{
     },
     protobuf::Protobuf,
 };
-use ics06_solomachine::v3::consensus_state::ConsensusState as SmConsensusState;
+use ics06_solomachine::consensus_state::ConsensusState as SmConsensusState;
 use serde::{Deserialize, Serialize};
 
 const TENDERMINT_CONSENSUS_STATE_TYPE_URL: &str = "/ibc.lightclients.tendermint.v1.ConsensusState";
@@ -128,12 +128,10 @@ impl TryInto<ibc::clients::ics07_tendermint::consensus_state::ConsensusState>
     }
 }
 
-impl TryInto<ics06_solomachine::v3::consensus_state::ConsensusState> for AnyConsensusState {
+impl TryInto<ics06_solomachine::consensus_state::ConsensusState> for AnyConsensusState {
     type Error = ClientError;
 
-    fn try_into(
-        self,
-    ) -> Result<ics06_solomachine::v3::consensus_state::ConsensusState, Self::Error> {
+    fn try_into(self) -> Result<ics06_solomachine::consensus_state::ConsensusState, Self::Error> {
         match self {
             AnyConsensusState::Tendermint(_) => Err(ClientError::Other {
                 description: "Cannot convert tendermint consensus state to solomachine".to_string(),
