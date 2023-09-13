@@ -105,9 +105,10 @@ impl ClientExecutionContext for NearIbcStore {
 }
 
 impl ExecutionContext for NearIbcStore {
-    fn increase_client_counter(&mut self) {
+    fn increase_client_counter(&mut self) -> Result<(), ContextError> {
         self.client_counter += 1;
         log!("client_counter has increased to: {}", self.client_counter);
+        Ok(())
     }
 
     fn store_update_time(
@@ -236,12 +237,13 @@ impl ExecutionContext for NearIbcStore {
         Ok(())
     }
 
-    fn increase_connection_counter(&mut self) {
+    fn increase_connection_counter(&mut self) -> Result<(), ContextError> {
         self.connection_counter += 1;
         log!(
             "connection_counter has increased to: {}",
             self.connection_counter
         );
+        Ok(())
     }
 
     fn store_packet_commitment(
@@ -426,12 +428,13 @@ impl ExecutionContext for NearIbcStore {
         Ok(())
     }
 
-    fn increase_channel_counter(&mut self) {
+    fn increase_channel_counter(&mut self) -> Result<(), ContextError> {
         self.channel_counter += 1;
         log!("channel_counter has increased to: {}", self.channel_counter);
+        Ok(())
     }
 
-    fn emit_ibc_event(&mut self, event: IbcEvent) {
+    fn emit_ibc_event(&mut self, event: IbcEvent) -> Result<(), ContextError> {
         let height = self.host_height().unwrap();
         if self.ibc_events_history.contains_key(&height) {
             self.ibc_events_history
@@ -442,10 +445,12 @@ impl ExecutionContext for NearIbcStore {
                 .push_back((height, vec![event.clone()]));
         }
         event.emit();
+        Ok(())
     }
 
-    fn log_message(&mut self, message: String) {
+    fn log_message(&mut self, message: String) -> Result<(), ContextError> {
         log!("{}", message);
+        Ok(())
     }
 
     fn get_client_execution_context(&mut self) -> &mut Self::E {

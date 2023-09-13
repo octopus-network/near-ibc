@@ -138,10 +138,11 @@ impl Contract {
         ExtraDepositCost::reset();
         // Deliver messages to `ibc-rs`
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
+        let mut router = self.near_ibc_store.get().unwrap();
 
         let errors = messages.into_iter().fold(vec![], |mut errors, msg| {
             match MsgEnvelope::try_from(msg) {
-                Ok(msg) => match ibc::core::dispatch(&mut near_ibc_store, msg) {
+                Ok(msg) => match ibc::core::dispatch(&mut near_ibc_store, &mut router, msg) {
                     Ok(()) => (),
                     Err(e) => errors.push(e),
                 },
@@ -297,6 +298,7 @@ impl TransferRequestHandler for Contract {
     fn process_transfer_request(&mut self, transfer_request: Ics20TransferRequest) {
         utils::assert_sub_account();
         if let Err(e) = send_transfer(
+            &mut TransferModule(),
             &mut TransferModule(),
             MsgTransfer {
                 port_id_on_a: PortId::from_str(transfer_request.port_on_a.as_str()).unwrap(),

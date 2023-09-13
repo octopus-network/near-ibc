@@ -1,8 +1,6 @@
 use crate::{context::NearIbcStore, prelude::*};
-use ibc::core::{
-    ics24_host::identifier::PortId,
-    router::{Module, ModuleId, Router},
-};
+use ibc::core::ics24_host::identifier::PortId;
+use ibc::core::router::{Module, ModuleId, Router};
 
 impl Router for NearIbcStore {
     //
@@ -21,8 +19,8 @@ impl Router for NearIbcStore {
             _ => None,
         }
     }
-    //
-    fn lookup_module_by_port(&self, port_id: &PortId) -> Option<ModuleId> {
+    /// Return the module_id associated with a given port_id
+    fn lookup_module(&self, port_id: &PortId) -> Option<ModuleId> {
         self.module_holder.get_module_id(port_id)
     }
 }
