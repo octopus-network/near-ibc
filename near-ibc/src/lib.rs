@@ -38,14 +38,16 @@ use near_sdk::{
     serde::{Deserialize, Serialize},
     serde_json,
     store::LookupMap,
-    AccountId, BorshStorageKey, PanicOnDefault, Promise,
+    AccountId, BorshStorageKey, PanicOnDefault,
 };
+use types::ProcessingResult;
 use utils::{
     interfaces::{
         ext_channel_escrow, ext_escrow_factory, ext_process_transfer_request_callback,
         ext_token_factory, TransferRequestHandler,
     },
-    types::{AssetDenom, Ics20TransferRequest},
+    types::{AssetDenom, CrossChainAsset, Ics20TransferRequest},
+    ExtraDepositCost,
 };
 
 mod collections;
@@ -59,7 +61,7 @@ mod testnet_functions;
 pub mod types;
 pub mod viewer;
 
-pub const DEFAULT_COMMITMENT_PREFIX: &str = "ibc";
+pub const VERSION: &str = "v1.0.0-pre.4";
 
 #[derive(BorshDeserialize, BorshSerialize, BorshStorageKey, Clone)]
 pub enum StorageKey {
@@ -117,6 +119,7 @@ impl Contract {
     #[private]
     #[init]
     pub fn init() -> Self {
+        env::storage_write("version".as_bytes(), VERSION.as_bytes());
         Self {
             near_ibc_store: LazyOption::new(StorageKey::NearIbcStore, Some(&NearIbcStore::new())),
             governance_account: env::current_account_id(),
@@ -126,11 +129,13 @@ impl Contract {
     #[payable]
     pub fn deliver(&mut self, messages: Vec<Any>) {
         assert!(
-            env::attached_deposit() >= utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG,
+            env::attached_deposit()
+                >= utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG * messages.len() as u128,
             "Need to attach at least {} yocto NEAR to cover the possible storage cost.",
-            utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG
+            utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG * messages.len() as u128
         );
         let used_bytes = env::storage_usage();
+        ExtraDepositCost::reset();
         // Deliver messages to `ibc-rs`
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
 
@@ -147,10 +152,10 @@ impl Contract {
         if errors.len() > 0 {
             log!("Error(s) occurred: {:?}", errors);
         }
+        near_ibc_store.flush();
         self.near_ibc_store.set(&near_ibc_store);
-
         // Refund unused deposit.
-        utils::refund_deposit(used_bytes, env::attached_deposit());
+        utils::refund_deposit(used_bytes);
     }
     // Assert that the caller is the preset governance account.
     fn assert_governance(&self) {
@@ -166,8 +171,6 @@ impl Contract {
     #[payable]
     pub fn setup_wrapped_token(
         &mut self,
-        port_id: String,
-        channel_id: String,
         trace_path: String,
         base_denom: String,
         metadata: FungibleTokenMetadata,
@@ -178,40 +181,43 @@ impl Contract {
             "ERR_NOT_ENOUGH_GAS"
         );
         let asset_denom = AssetDenom {
-            trace_path,
-            base_denom,
+            trace_path: trace_path.clone(),
+            base_denom: base_denom.clone(),
+        };
+        let cross_chain_asset = CrossChainAsset {
+            asset_id: "00000000000000000000000000000000".to_string(),
+            asset_denom: asset_denom.clone(),
+            metadata: metadata.clone(),
         };
         let minimum_deposit = utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT
-            + env::storage_byte_cost() * (asset_denom.try_to_vec().unwrap().len() + 32) as u128 * 2;
+            + env::storage_byte_cost()
+                * (32 + cross_chain_asset.try_to_vec().unwrap().len()) as u128;
         assert!(
             env::attached_deposit() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
             minimum_deposit
         );
         let used_bytes = env::storage_usage();
+        ExtraDepositCost::reset();
         ext_token_factory::ext(utils::get_token_factory_contract_id())
-            .with_attached_deposit(env::attached_deposit())
+            .with_attached_deposit(minimum_deposit)
             .with_static_gas(
                 utils::GAS_FOR_COMPLEX_FUNCTION_CALL - utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
             )
             .with_unused_gas_weight(0)
-            .setup_asset(
-                port_id,
-                channel_id,
-                asset_denom.trace_path,
-                asset_denom.base_denom,
-                metadata,
-            );
-        utils::refund_deposit(used_bytes, env::attached_deposit() - minimum_deposit)
+            .setup_asset(asset_denom.trace_path, asset_denom.base_denom, metadata);
+        ExtraDepositCost::add(minimum_deposit);
+        utils::refund_deposit(used_bytes);
     }
     /// Set the max length of the IBC events history queue.
     ///
     /// Only the governance account can call this function.
-    pub fn set_max_length_of_ibc_events_history(&mut self, max_length: u64) {
+    pub fn set_max_length_of_ibc_events_history(&mut self, max_length: u64) -> ProcessingResult {
         self.assert_governance();
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
-        near_ibc_store.ibc_events_history.set_max_length(max_length);
+        let result = near_ibc_store.ibc_events_history.set_max_length(max_length);
         self.near_ibc_store.set(&near_ibc_store);
+        result
     }
     /// Setup the escrow contract for the given channel.
     ///
@@ -231,36 +237,60 @@ impl Contract {
             minimum_deposit
         );
         let used_bytes = env::storage_usage();
+        ExtraDepositCost::reset();
         ext_escrow_factory::ext(utils::get_escrow_factory_contract_id())
-            .with_attached_deposit(env::attached_deposit())
+            .with_attached_deposit(minimum_deposit)
             .with_static_gas(
                 utils::GAS_FOR_COMPLEX_FUNCTION_CALL - utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
             )
             .with_unused_gas_weight(0)
             .create_escrow(ChannelId::from_str(channel_id.as_str()).unwrap());
-        utils::refund_deposit(used_bytes, env::attached_deposit() - minimum_deposit);
+        ExtraDepositCost::add(minimum_deposit);
+        utils::refund_deposit(used_bytes);
     }
     /// Register the given token contract for the given channel.
     ///
     /// Only the governance account can call this function.
+    #[payable]
     pub fn register_asset_for_channel(
         &mut self,
         channel_id: String,
-        denom: String,
+        base_denom: String,
         token_contract: AccountId,
     ) {
         self.assert_governance();
+        let prefixed_base_account = format!(".{}", env::current_account_id());
+        assert!(
+            !token_contract
+                .to_string()
+                .ends_with(prefixed_base_account.as_str()),
+            "ERR_INVALID_TOKEN_CONTRACT_ACCOUNT, \
+            must not be the cross chain assets received by near-ibc."
+        );
+        let asset_denom = AssetDenom {
+            trace_path: String::new(),
+            base_denom,
+        };
+        let minimum_deposit = env::storage_byte_cost()
+            * (asset_denom.try_to_vec().unwrap().len() + token_contract.to_string().len()) as u128;
+        assert!(
+            env::attached_deposit() >= minimum_deposit,
+            "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
+            minimum_deposit
+        );
+        let used_bytes = env::storage_usage();
+        ExtraDepositCost::reset();
         let escrow_account_id =
             format!("{}.{}", channel_id, utils::get_escrow_factory_contract_id());
         ext_channel_escrow::ext(AccountId::from_str(escrow_account_id.as_str()).unwrap())
-            .with_attached_deposit(env::attached_deposit())
+            .with_attached_deposit(minimum_deposit)
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
             .with_unused_gas_weight(0)
-            .register_asset(denom, token_contract);
+            .register_asset(asset_denom.base_denom, token_contract);
+        ExtraDepositCost::add(minimum_deposit);
+        utils::refund_deposit(used_bytes);
     }
 }
-
-utils::impl_storage_check_and_refund!(Contract);
 
 #[near_bindgen]
 impl TransferRequestHandler for Contract {
@@ -288,9 +318,7 @@ impl TransferRequestHandler for Contract {
                     receiver: Signer::from(transfer_request.receiver.clone()),
                     memo: Memo::from_str("").unwrap(),
                 },
-                timeout_height_on_b: TimeoutHeight::At(
-                    Height::new(0, env::block_height() + 1000).unwrap(),
-                ),
+                timeout_height_on_b: TimeoutHeight::Never {},
                 timeout_timestamp_on_b: Timestamp::from_nanoseconds(
                     env::block_timestamp() + 1000 * 1000000000,
                 )
@@ -310,6 +338,7 @@ impl TransferRequestHandler for Contract {
                 .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
                 .with_unused_gas_weight(0)
                 .cancel_transfer_request(
+                    transfer_request.token_trace_path,
                     transfer_request.token_denom,
                     AccountId::from_str(transfer_request.sender.as_str()).unwrap(),
                     transfer_request.amount,
@@ -347,7 +376,8 @@ impl Contract {
     pub fn cancel_transfer_request_in_channel_escrow(
         &mut self,
         channel_id: String,
-        token_denom: String,
+        trace_path: String,
+        base_denom: String,
         sender_id: AccountId,
         amount: U128,
     ) {
@@ -360,7 +390,7 @@ impl Contract {
         .with_attached_deposit(0)
         .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
         .with_unused_gas_weight(0)
-        .cancel_transfer_request(token_denom, sender_id, amount);
+        .cancel_transfer_request(trace_path, base_denom, sender_id, amount);
     }
 }
 

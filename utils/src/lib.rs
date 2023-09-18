@@ -13,15 +13,12 @@ extern crate alloc;
 use core::str::FromStr;
 use ibc::applications::transfer::PORT_ID_STR;
 use near_sdk::{
-    env,
-    json_types::{U128, U64},
-    serde::{Deserialize, Serialize},
-    AccountId, Balance, Gas, Promise,
+    borsh::{self, BorshDeserialize, BorshSerialize},
+    env, AccountId, Balance, Gas, Promise,
 };
 use prelude::*;
 
 pub mod interfaces;
-mod macros;
 mod prelude;
 pub mod types;
 
@@ -33,10 +30,43 @@ pub const GAS_FOR_SIMPLE_FUNCTION_CALL: Gas = Gas(5_000_000_000_000);
 /// As the `deliver` function may cause storage changes, the caller needs to attach some NEAR
 /// to cover the storage cost. The minimum valid amount is 0.05 NEAR (for 5 kb storage).
 pub const MINIMUM_DEPOSIT_FOR_DELEVER_MSG: Balance = 50_000_000_000_000_000_000_000;
+/// The storage deposit for registering an account in the token contract. (0.0125 NEAR)
+pub const STORAGE_DEPOSIT_FOR_MINT_TOKEN: Balance = 12_500_000_000_000_000_000_000;
 /// Initial balance for the token contract to cover storage deposit.
 pub const INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT: Balance = 3_500_000_000_000_000_000_000_000;
 /// Initial balance for the channel escrow to cover storage deposit.
 pub const INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT: Balance = 3_000_000_000_000_000_000_000_000;
+
+const STORAGE_KEY_FOR_EXTRA_DEPOSIT_COST: &[u8] = b"extra_deposit_cost";
+
+#[derive(BorshSerialize, BorshDeserialize)]
+pub struct ExtraDepositCost(u128);
+
+impl ExtraDepositCost {
+    /// Reset the extra deposit cost to 0.
+    pub fn reset() {
+        env::storage_write(
+            STORAGE_KEY_FOR_EXTRA_DEPOSIT_COST,
+            &Self(0).try_to_vec().unwrap(),
+        );
+    }
+    /// Add the extra deposit cost.
+    pub fn add(cost: u128) {
+        let mut extra_deposit_cost = Self::get();
+        extra_deposit_cost.0 += cost;
+        env::storage_write(
+            STORAGE_KEY_FOR_EXTRA_DEPOSIT_COST,
+            &extra_deposit_cost.try_to_vec().unwrap(),
+        );
+    }
+    /// Get the extra deposit cost.
+    pub fn get() -> Self {
+        match env::storage_read(STORAGE_KEY_FOR_EXTRA_DEPOSIT_COST) {
+            Some(bytes) => Self::try_from_slice(&bytes).unwrap(),
+            None => Self(0),
+        }
+    }
+}
 
 /// Check the usage of storage of current account and refund the unused attached deposit.
 ///
@@ -45,27 +75,27 @@ pub const INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT: Balance = 3_000_000_000_000_
 ///
 /// Better to call this function at the end of a `payable` function
 /// by recording the `previously_used_bytes` at the start of the `payable` function.
-pub fn refund_deposit(previously_used_bytes: u64, max_refundable_amount: u128) {
-    #[derive(Serialize, Deserialize, Clone)]
-    #[serde(crate = "near_sdk::serde")]
-    struct Input {
-        pub caller: AccountId,
-        pub max_refundable_amount: U128,
-        pub previously_used_bytes: U64,
+pub fn refund_deposit(previously_used_bytes: u64) {
+    let mut refund_amount = env::attached_deposit();
+    let extra_deposit_cost = ExtraDepositCost::get().0;
+    if env::storage_usage() > previously_used_bytes || extra_deposit_cost > 0 {
+        let storage_increment = match env::storage_usage() > previously_used_bytes {
+            true => env::storage_usage() - previously_used_bytes,
+            false => 0,
+        };
+        near_sdk::log!(
+            "Storage increment: {}, extra deposit cost: {}",
+            storage_increment,
+            extra_deposit_cost
+        );
+        let cost = env::storage_byte_cost() * storage_increment as u128 + extra_deposit_cost;
+        if cost >= refund_amount {
+            return;
+        } else {
+            refund_amount -= cost;
+        }
     }
-    let args = Input {
-        caller: env::predecessor_account_id(),
-        max_refundable_amount: U128(max_refundable_amount),
-        previously_used_bytes: U64(previously_used_bytes),
-    };
-    let args = near_sdk::serde_json::to_vec(&args)
-        .expect("ERR_SERIALIZE_ARGS_OF_CHECK_STORAGE_AND_REFUND");
-    Promise::new(env::current_account_id()).function_call(
-        "check_storage_and_refund".to_string(),
-        args,
-        0,
-        GAS_FOR_SIMPLE_FUNCTION_CALL,
-    );
+    Promise::new(env::predecessor_account_id()).transfer(refund_amount);
 }
 
 /// Asserts that the predecessor account is the root account.
@@ -110,9 +140,9 @@ pub fn assert_grandparent_account() {
 /// Asserts that the predecessor account is the sub account of current account.
 pub fn assert_sub_account() {
     let account_id = env::predecessor_account_id().to_string();
-    let (_first, parent) = account_id.split_once(".").unwrap();
+    let prefixed_current_account = format!(".{}", env::current_account_id());
     assert!(
-        parent.ends_with(env::current_account_id().as_str()),
+        account_id.ends_with(prefixed_current_account.as_str()),
         "ERR_ONLY_SUB_ACCOUNT_CAN_CALL_THIS_METHOD"
     );
 }
@@ -120,9 +150,9 @@ pub fn assert_sub_account() {
 /// Asserts that the predecessor account is an ancestor account of current account.
 pub fn assert_ancestor_account() {
     let account_id = env::current_account_id().to_string();
-    let (_first, parent) = account_id.split_once(".").unwrap();
+    let prefixed_predecessor_account = format!(".{}", env::predecessor_account_id());
     assert!(
-        parent.ends_with(env::predecessor_account_id().as_str()),
+        account_id.ends_with(prefixed_predecessor_account.as_str()),
         "ERR_ONLY_UPPER_LEVEL_ACCOUNT_CAN_CALL_THIS_METHOD"
     );
 }

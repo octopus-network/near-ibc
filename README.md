@@ -141,3 +141,9 @@ The contract `channel-escrow` will at least provide the following interfaces (fu
 Please refer to release notes for details.
 
 * [v1.0.0 pre-release 1](https://github.com/octopus-network/near-ibc/releases/tag/v1.0.0-pre.1)
+
+## Auditing
+
+These contracts had completed auditing by:
+
+* [Blocksec](https://blocksec.com) - The report is [here](/auditing/blocksec_near-ibc_v1.0_signed.pdf).

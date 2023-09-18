@@ -12,7 +12,6 @@ use ibc::{
             commitment::{AcknowledgementCommitment, PacketCommitment},
             packet::Sequence,
         },
-        ics23_commitment::commitment::CommitmentPrefix,
         ics24_host::{
             identifier::{ChannelId, ClientId, ConnectionId, PortId},
             path::{
@@ -31,6 +30,8 @@ use near_sdk::{
 };
 
 pub trait Viewer {
+    /// Show the version of the contract.
+    fn version(&self) -> String;
     /// Get the latest height of the host chain.
     fn get_latest_height(&self) -> Height;
     /// Get the connection end associated with the given connection identifier.
@@ -96,7 +97,7 @@ pub trait Viewer {
         channel_id: ChannelId,
     ) -> Vec<Sequence>;
     /// Get the commitment packet stored on this host.
-    fn get_commitment_prefix(&self) -> CommitmentPrefix;
+    fn get_commitment_prefix(&self) -> Vec<u8>;
     /// Get the packet events associated with the given query request.
     fn get_packet_events(
         &self,
@@ -110,8 +111,12 @@ pub trait Viewer {
 
 #[near_bindgen]
 impl Viewer for Contract {
+    fn version(&self) -> String {
+        VERSION.to_string()
+    }
+
     fn get_latest_height(&self) -> Height {
-        Height::new(env::epoch_height(), env::block_height()).unwrap()
+        Height::new(0, env::block_height()).unwrap()
     }
 
     fn get_connection_end(&self, connection_id: ConnectionId) -> Option<ConnectionEnd> {
@@ -337,9 +342,9 @@ impl Viewer for Contract {
             })
     }
 
-    fn get_commitment_prefix(&self) -> CommitmentPrefix {
+    fn get_commitment_prefix(&self) -> Vec<u8> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
-        near_ibc_store.commitment_prefix()
+        near_ibc_store.commitment_prefix().into_vec()
     }
 
     fn get_packet_events(

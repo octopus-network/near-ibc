@@ -11,7 +11,6 @@
 extern crate alloc;
 
 use alloc::{
-    format,
     string::{String, ToString},
     vec,
     vec::Vec,
@@ -33,7 +32,7 @@ use utils::{
         ext_transfer_request_handler, ChannelEscrow, NearIbcAccountAssertion,
         ProcessTransferRequestCallback,
     },
-    types::Ics20TransferRequest,
+    types::{AssetDenom, Ics20TransferRequest},
 };
 
 #[derive(BorshSerialize, BorshStorageKey)]
@@ -45,8 +44,14 @@ pub enum StorageKey {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub struct FtOnTransferMsg {
-    pub token_denom: String,
     pub receiver: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(crate = "near_sdk::serde")]
+pub struct RegisteredAsset {
+    pub token_contract: AccountId,
+    pub asset_denom: AssetDenom,
 }
 
 #[near_bindgen]
@@ -55,7 +60,7 @@ pub struct Contract {
     /// The account id of IBC/TAO implementation.
     near_ibc_account: AccountId,
     /// The token accounts that this contract is allowed to send tokens to.
-    token_contracts: UnorderedMap<String, AccountId>,
+    token_contracts: UnorderedMap<AccountId, AssetDenom>,
     /// Accounting for the pending transfer requests.
     pending_transfer_requests: UnorderedMap<AccountId, Ics20TransferRequest>,
 }
@@ -64,7 +69,6 @@ pub struct Contract {
 impl Contract {
     #[init]
     pub fn new(near_ibc_account: AccountId) -> Self {
-        assert!(!env::state_exists(), "ERR_ALREADY_INITIALIZED");
         let account_id = String::from(env::current_account_id().as_str());
         let parts = account_id.split(".").collect::<Vec<&str>>();
         assert!(
@@ -84,13 +88,8 @@ impl Contract {
         amount: U128,
         msg: String,
     ) -> PromiseOrValue<U128> {
-        assert!(
-            self.token_contracts
-                .values()
-                .into_iter()
-                .any(|id| env::predecessor_account_id().eq(id)),
-            "ERR_UNREGISTERED_TOKEN_CONTRACT"
-        );
+        let token_denom = self.token_contracts.get(&env::predecessor_account_id());
+        assert!(token_denom.is_some(), "ERR_UNREGISTERED_TOKEN_CONTRACT");
         assert!(
             !self.pending_transfer_requests.contains_key(&sender_id),
             "ERR_PENDING_TRANSFER_REQUEST_EXISTS"
@@ -104,11 +103,12 @@ impl Contract {
         let msg = parse_result.unwrap();
         let current_account_id = env::current_account_id();
         let (channel_id, _) = current_account_id.as_str().split_once(".").unwrap();
+        let token_denom = token_denom.unwrap();
         let transfer_request = Ics20TransferRequest {
             port_on_a: PORT_ID_STR.to_string(),
             chan_on_a: channel_id.to_string(),
-            token_trace_path: String::new(),
-            token_denom: msg.token_denom,
+            token_trace_path: token_denom.trace_path.clone(),
+            token_denom: token_denom.base_denom.clone(),
             amount,
             sender: sender_id.to_string(),
             receiver: msg.receiver,
@@ -126,6 +126,7 @@ impl Contract {
     /// Assert that the given account has a pending burning request with the given amount.
     fn checked_remove_pending_transfer_request(
         &mut self,
+        trace_path: &String,
         base_denom: &String,
         account_id: &AccountId,
         amount: U128,
@@ -135,39 +136,63 @@ impl Contract {
             "ERR_NO_PENDING_TRANSFER_REQUEST"
         );
         let req = self.pending_transfer_requests.get(&account_id).unwrap();
-        if req.amount != amount || !req.token_denom.eq(base_denom) {
-            panic!("ERR_PENDING_TRANSFER_REQUEST_NOT_MATCHED");
-        }
+        assert!(
+            req.amount == amount
+                && req.token_denom.eq(base_denom)
+                && req.token_trace_path.eq(trace_path),
+            "ERR_PENDING_TRANSFER_REQUEST_NOT_MATCHED"
+        );
         self.pending_transfer_requests.remove(&account_id);
+    }
+    // Get token contract account id corresponding to the asset denom.
+    fn get_token_contract_by_asset_denom(&self, asset_denom: &AssetDenom) -> Option<AccountId> {
+        self.token_contracts
+            .iter()
+            .find(|(_, value)| *value == asset_denom)
+            .map(|(id, _)| id.clone())
     }
 }
 
-utils::impl_storage_check_and_refund!(Contract);
-
 #[near_bindgen]
 impl ChannelEscrow for Contract {
-    fn register_asset(&mut self, denom: String, token_contract: AccountId) {
+    #[payable]
+    fn register_asset(&mut self, base_denom: String, token_contract: AccountId) {
+        self.assert_near_ibc_account();
+        let asset_denom = AssetDenom {
+            trace_path: String::new(),
+            base_denom,
+        };
+        let maybe_existed_token_contract = self.get_token_contract_by_asset_denom(&asset_denom);
         assert!(
-            !self
-                .token_contracts
-                .values()
-                .into_iter()
-                .any(|id| id == &token_contract),
+            maybe_existed_token_contract.is_none(),
             "ERR_TOKEN_CONTRACT_ALREADY_REGISTERED"
         );
-        self.token_contracts.insert(denom, token_contract);
+        self.token_contracts.insert(token_contract, asset_denom);
     }
 
-    fn do_transfer(&mut self, base_denom: String, receiver_id: AccountId, amount: U128) {
+    #[payable]
+    fn do_transfer(
+        &mut self,
+        trace_path: String,
+        base_denom: String,
+        receiver_id: AccountId,
+        amount: U128,
+    ) {
         self.assert_near_ibc_account();
+        let asset_denom = AssetDenom {
+            trace_path,
+            base_denom,
+        };
+        let maybe_existed_token_contract = self.get_token_contract_by_asset_denom(&asset_denom);
         assert!(
-            self.token_contracts.contains_key(&base_denom),
+            maybe_existed_token_contract.is_some(),
             "ERR_INVALID_TOKEN_DENOM"
         );
-        let token_contract = self.token_contracts.get(&base_denom).unwrap();
+        near_sdk::assert_one_yocto();
+        let token_contract = maybe_existed_token_contract.unwrap();
         ext_ft_core::ext(token_contract.clone())
             .with_attached_deposit(1)
-            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 2)
             .with_unused_gas_weight(0)
             .ft_transfer(receiver_id, amount.into(), None);
     }
@@ -175,23 +200,55 @@ impl ChannelEscrow for Contract {
 
 #[near_bindgen]
 impl ProcessTransferRequestCallback for Contract {
-    fn apply_transfer_request(&mut self, base_denom: String, sender_id: AccountId, amount: U128) {
+    fn apply_transfer_request(
+        &mut self,
+        trace_path: String,
+        base_denom: String,
+        sender_id: AccountId,
+        amount: U128,
+    ) {
         self.assert_near_ibc_account();
+        let asset_denom = AssetDenom {
+            trace_path,
+            base_denom,
+        };
+        let maybe_existed_token_contract = self.get_token_contract_by_asset_denom(&asset_denom);
         assert!(
-            self.token_contracts.contains_key(&base_denom),
+            maybe_existed_token_contract.is_some(),
             "ERR_INVALID_TOKEN_DENOM"
         );
-        self.checked_remove_pending_transfer_request(&base_denom, &sender_id, amount);
+        self.checked_remove_pending_transfer_request(
+            &asset_denom.trace_path,
+            &asset_denom.base_denom,
+            &sender_id,
+            amount,
+        );
     }
 
-    fn cancel_transfer_request(&mut self, base_denom: String, sender_id: AccountId, amount: U128) {
+    fn cancel_transfer_request(
+        &mut self,
+        trace_path: String,
+        base_denom: String,
+        sender_id: AccountId,
+        amount: U128,
+    ) {
         self.assert_near_ibc_account();
+        let asset_denom = AssetDenom {
+            trace_path,
+            base_denom,
+        };
+        let maybe_existed_token_contract = self.get_token_contract_by_asset_denom(&asset_denom);
         assert!(
-            self.token_contracts.contains_key(&base_denom),
+            maybe_existed_token_contract.is_some(),
             "ERR_INVALID_TOKEN_DENOM"
         );
-        self.checked_remove_pending_transfer_request(&base_denom, &sender_id, amount);
-        let token_contract = self.token_contracts.get(&base_denom).unwrap();
+        self.checked_remove_pending_transfer_request(
+            &asset_denom.trace_path,
+            &asset_denom.base_denom,
+            &sender_id,
+            amount,
+        );
+        let token_contract = maybe_existed_token_contract.unwrap();
         ext_ft_core::ext(token_contract.clone())
             .with_attached_deposit(1)
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 2)
@@ -206,18 +263,40 @@ impl NearIbcAccountAssertion for Contract {
     }
 }
 
-/// View functions for the wrapped token.
+/// View functions.
+pub trait Viewer {
+    /// Get all registered assets.
+    fn get_registered_assets(&self) -> Vec<RegisteredAsset>;
+    /// Get all pending accounts.
+    fn get_pending_accounts(&self) -> Vec<AccountId>;
+    /// Get pending transfer request of the given account.
+    fn get_pending_transfer_request_of(
+        &self,
+        account_id: AccountId,
+    ) -> Option<Ics20TransferRequest>;
+}
+
 #[near_bindgen]
-impl Contract {
+impl Viewer for Contract {
     ///
-    pub fn get_pending_accounts(&self) -> Vec<AccountId> {
+    fn get_registered_assets(&self) -> Vec<RegisteredAsset> {
+        self.token_contracts
+            .iter()
+            .map(|(token_contract, asset_denom)| RegisteredAsset {
+                token_contract: token_contract.clone(),
+                asset_denom: asset_denom.clone(),
+            })
+            .collect()
+    }
+    ///
+    fn get_pending_accounts(&self) -> Vec<AccountId> {
         self.pending_transfer_requests
             .keys()
             .map(|account_id| account_id.clone())
             .collect()
     }
     ///
-    pub fn get_pending_transfer_request_of(
+    fn get_pending_transfer_request_of(
         &self,
         account_id: AccountId,
     ) -> Option<Ics20TransferRequest> {

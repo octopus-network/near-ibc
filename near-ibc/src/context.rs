@@ -4,6 +4,7 @@ use crate::{
     },
     module_holder::ModuleHolder,
     prelude::*,
+    types::ProcessingResult,
     StorageKey,
 };
 use core::fmt::{Debug, Formatter};
@@ -73,7 +74,7 @@ pub trait NearIbcStoreHost {
     ///
     fn set_near_ibc_store(store: &NearIbcStore) {
         let store = store.try_to_vec().unwrap();
-        near_sdk::env::storage_write(b"ibc_store", &store);
+        near_sdk::env::storage_write(&StorageKey::NearIbcStore.try_to_vec().unwrap(), &store);
     }
 }
 
@@ -117,12 +118,16 @@ impl NearIbcStore {
     pub fn remove_client(&mut self, client_id: &ClientId) {
         if let Some(queue) = self.client_processed_heights.get_mut(client_id) {
             queue.clear();
+            queue.flush();
         }
         self.client_processed_heights.remove(client_id);
+        self.client_processed_heights.flush();
         if let Some(queue) = self.client_processed_times.get_mut(client_id) {
             queue.clear();
+            queue.flush();
         }
         self.client_processed_times.remove(client_id);
+        self.client_processed_times.flush();
         env::storage_remove(
             &ClientConnectionPath::new(client_id)
                 .to_string()
@@ -142,14 +147,17 @@ impl NearIbcStore {
                 })
             });
         self.client_consensus_state_height_sets.remove(client_id);
+        self.client_consensus_state_height_sets.flush();
         env::storage_remove(&ClientStatePath::new(client_id).to_string().into_bytes());
         self.client_id_set.remove(client_id);
+        self.client_id_set.flush();
         log!("Client '{}' has been removed.", client_id);
     }
     ///
     pub fn remove_connection(&mut self, connection_id: &ConnectionId) {
         env::storage_remove(&ConnectionPath::new(&connection_id).to_string().into_bytes());
         self.connection_id_set.remove(connection_id);
+        self.connection_id_set.flush();
         log!("Connection '{}' has been removed.", connection_id);
     }
     ///
@@ -203,6 +211,7 @@ impl NearIbcStore {
                 .into_bytes(),
         );
         self.port_channel_id_set.remove(port_channel_id);
+        self.port_channel_id_set.flush();
         log!(
             "Channel '{}/{}' has been removed.",
             port_channel_id.0,
@@ -216,7 +225,20 @@ impl NearIbcStore {
         self.channel_counter = 0;
     }
     ///
-    pub fn clear_ibc_events_history(&mut self) {
-        self.ibc_events_history.clear();
+    pub fn clear_ibc_events_history(&mut self) -> ProcessingResult {
+        self.ibc_events_history.clear()
+    }
+    ///
+    pub fn flush(&mut self) {
+        self.client_id_set.flush();
+        self.client_processed_heights.flush();
+        self.client_processed_times.flush();
+        self.client_consensus_state_height_sets.flush();
+        self.connection_id_set.flush();
+        self.port_channel_id_set.flush();
+        self.packet_commitment_sequence_sets.flush();
+        self.packet_receipt_sequence_sets.flush();
+        self.packet_acknowledgement_sequence_sets.flush();
+        self.ibc_events_history.flush();
     }
 }

@@ -10,12 +10,14 @@
 
 extern crate alloc;
 
+use core::str::FromStr;
+
 use alloc::{
-    format,
     string::{String, ToString},
     vec,
     vec::Vec,
 };
+use ibc::applications::transfer::TracePath;
 use near_contract_standards::fungible_token::{
     events::{FtBurn, FtMint},
     metadata::{FungibleTokenMetadata, FungibleTokenMetadataProvider},
@@ -56,10 +58,6 @@ pub struct Contract {
     token: FungibleToken,
     /// The metadata of the token.
     metadata: LazyOption<FungibleTokenMetadata>,
-    /// The port id of the token, in ICS-20 of IBC protocol.
-    port_id: String,
-    /// The channel id of the token, in ICS-20 of IBC protocol.
-    channel_id: String,
     /// The trace path of the token, in ICS-20 of IBC protocol.
     trace_path: String,
     /// The base denom of the token, in ICS-20 of IBC protocol.
@@ -75,13 +73,10 @@ impl Contract {
     #[init]
     pub fn new(
         metadata: FungibleTokenMetadata,
-        port_id: String,
-        channel_id: String,
         trace_path: String,
         base_denom: String,
         near_ibc_account: AccountId,
     ) -> Self {
-        assert!(!env::state_exists(), "ERR_ALREADY_INITIALIZED");
         let account_id = String::from(env::current_account_id().as_str());
         let parts = account_id.split(".").collect::<Vec<&str>>();
         assert!(
@@ -95,11 +90,18 @@ impl Contract {
                 .ends_with(near_ibc_account.as_str()),
             "ERR_NEAR_IBC_ACCOUNT_MUST_HAVE_THE_SAME_ROOT_ACOUNT_AS_CURRENT_ACCOUNT"
         );
+        let maybe_trace_path =
+            TracePath::from_str(trace_path.as_str()).expect("ERR_INVALID_TRACE_PATH");
+        // As this contract will only be initialized by the first time a cross chain asset
+        // is received by `near-ibc`, the trace path will at least have 1 trace prefix
+        // which is composed of the receiving port id and receiving channel id.
+        assert!(
+            !maybe_trace_path.is_empty(),
+            "ERR_TRACE_PATH_MUST_NOT_BE_EMPTY"
+        );
         let mut this = Self {
             token: FungibleToken::new(StorageKey::Token),
             metadata: LazyOption::new(StorageKey::Metadata, Some(&metadata)),
-            port_id,
-            channel_id,
             trace_path,
             base_denom,
             near_ibc_account,
@@ -126,10 +128,14 @@ impl Contract {
             !self.pending_transfer_requests.contains_key(&sender_id),
             "ERR_PENDING_TRANSFER_REQUEST_EXISTS"
         );
+        let trace_path_parts: Vec<&str> = self.trace_path.split('/').collect();
         // Schedule a call to `process_transfer_request` on `near-ibc` contract.
+        // As the `self.trace_path` is already validated in the constructor,
+        // we can safely use the first 2 parts of `self.trace_path` as the source port id
+        // and source channel id.
         let transfer_request = Ics20TransferRequest {
-            port_on_a: self.port_id.clone(),
-            chan_on_a: self.channel_id.clone(),
+            port_on_a: trace_path_parts[0].to_string(),
+            chan_on_a: trace_path_parts[1].to_string(),
             token_trace_path: self.trace_path.clone(),
             token_denom: self.base_denom.clone(),
             amount,
@@ -165,6 +171,7 @@ impl Contract {
     /// Assert that the given account has a pending transfer request with the given amount.
     fn checked_remove_pending_transfer_request(
         &mut self,
+        trace_path: &String,
         base_denom: &String,
         account_id: &AccountId,
         amount: U128,
@@ -174,16 +181,18 @@ impl Contract {
             "ERR_NO_PENDING_TRANSFER_REQUEST"
         );
         let req = self.pending_transfer_requests.get(&account_id).unwrap();
-        if !self.base_denom.eq(base_denom) || req.amount != amount {
-            panic!("ERR_PENDING_TRANSFER_REQUEST_NOT_MATCHED")
-        }
+        assert!(
+            req.amount == amount
+                && req.token_denom.eq(base_denom)
+                && req.token_trace_path.eq(trace_path),
+            "ERR_PENDING_TRANSFER_REQUEST_NOT_MATCHED"
+        );
         self.pending_transfer_requests.remove(&account_id);
     }
 }
 
 near_contract_standards::impl_fungible_token_core!(Contract, token);
 near_contract_standards::impl_fungible_token_storage!(Contract, token);
-utils::impl_storage_check_and_refund!(Contract);
 
 #[near_bindgen]
 impl WrappedToken for Contract {
@@ -193,7 +202,7 @@ impl WrappedToken for Contract {
         let used_bytes = env::storage_usage();
         self.storage_deposit(Some(account_id.clone()), None);
         self.token.internal_deposit(&account_id, amount.into());
-        utils::refund_deposit(used_bytes, env::attached_deposit());
+        utils::refund_deposit(used_bytes);
         FtMint {
             owner_id: &account_id,
             amount: &amount,
@@ -215,35 +224,21 @@ impl WrappedToken for Contract {
         metadata.icon = Some(icon);
         self.metadata.set(&metadata);
         // Refund the unused attached deposit.
-        utils::refund_deposit(used_bytes, env::attached_deposit());
-    }
-
-    #[payable]
-    fn set_basic_metadata(&mut self, name: String, symbol: String, decimals: u8) {
-        utils::assert_parent_account();
-        assert!(
-            env::attached_deposit()
-                >= env::storage_byte_cost()
-                    * (name.clone().into_bytes().len() + symbol.clone().into_bytes().len() + 1)
-                        as u128,
-            "ERR_NOT_ENOUGH_DEPOSIT"
-        );
-        let used_bytes = env::storage_usage();
-        let mut metadata = self.metadata.get().unwrap();
-        metadata.name = name;
-        metadata.symbol = symbol;
-        metadata.decimals = decimals;
-        self.metadata.set(&metadata);
-        // Refund the unused attached deposit.
-        utils::refund_deposit(used_bytes, env::attached_deposit());
+        utils::refund_deposit(used_bytes);
     }
 }
 
 #[near_bindgen]
 impl ProcessTransferRequestCallback for Contract {
-    fn apply_transfer_request(&mut self, base_denom: String, sender_id: AccountId, amount: U128) {
+    fn apply_transfer_request(
+        &mut self,
+        trace_path: String,
+        base_denom: String,
+        sender_id: AccountId,
+        amount: U128,
+    ) {
         self.assert_near_ibc_account();
-        self.checked_remove_pending_transfer_request(&base_denom, &sender_id, amount);
+        self.checked_remove_pending_transfer_request(&trace_path, &base_denom, &sender_id, amount);
         self.token
             .internal_withdraw(&env::current_account_id(), amount.into());
         FtBurn {
@@ -254,9 +249,15 @@ impl ProcessTransferRequestCallback for Contract {
         .emit()
     }
 
-    fn cancel_transfer_request(&mut self, base_denom: String, sender_id: AccountId, amount: U128) {
+    fn cancel_transfer_request(
+        &mut self,
+        trace_path: String,
+        base_denom: String,
+        sender_id: AccountId,
+        amount: U128,
+    ) {
         self.assert_near_ibc_account();
-        self.checked_remove_pending_transfer_request(&base_denom, &sender_id, amount);
+        self.checked_remove_pending_transfer_request(&trace_path, &base_denom, &sender_id, amount);
         self.token
             .internal_withdraw(&env::current_account_id(), amount.into());
         self.token.internal_deposit(&sender_id, amount.into());

@@ -10,28 +10,26 @@ use near_sdk::{
 };
 use utils::{
     interfaces::{ext_wrapped_token, TokenFactory},
-    types::AssetDenom,
+    types::{AssetDenom, CrossChainAsset},
+    ExtraDepositCost,
 };
 
 #[derive(BorshSerialize, BorshStorageKey)]
 pub enum StorageKey {
-    AssetIdMappings,
-    DenomMappings,
     TokenContractWasm,
+    AssetIdMappings,
 }
 
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
 pub struct Contract {
-    asset_id_mappings: UnorderedMap<String, AssetDenom>,
-    denom_mappings: UnorderedMap<AssetDenom, String>,
+    asset_id_mappings: UnorderedMap<String, CrossChainAsset>,
 }
 
 #[near_bindgen]
 impl Contract {
     #[init]
     pub fn new() -> Self {
-        assert!(!env::state_exists(), "ERR_ALREADY_INITIALIZED");
         let account_id = String::from(env::current_account_id().as_str());
         let parts = account_id.split(".").collect::<Vec<&str>>();
         assert!(
@@ -40,20 +38,24 @@ impl Contract {
         );
         Self {
             asset_id_mappings: UnorderedMap::new(StorageKey::AssetIdMappings),
-            denom_mappings: UnorderedMap::new(StorageKey::DenomMappings),
         }
     }
+    ///
+    fn assert_asset_not_registered(&self, cross_chain_asset: &CrossChainAsset) {
+        self.asset_id_mappings.iter().for_each(|(_, asset)| {
+            assert!(
+                asset.asset_denom != cross_chain_asset.asset_denom,
+                "ERR_ASSET_ALREADY_REGISTERED"
+            );
+        });
+    }
 }
-
-utils::impl_storage_check_and_refund!(Contract);
 
 #[near_bindgen]
 impl TokenFactory for Contract {
     #[payable]
     fn setup_asset(
         &mut self,
-        port_id: String,
-        channel_id: String,
         trace_path: String,
         base_denom: String,
         metadata: FungibleTokenMetadata,
@@ -63,81 +65,77 @@ impl TokenFactory for Contract {
             trace_path: trace_path.clone(),
             base_denom: base_denom.clone(),
         };
+        let mut cross_chain_asset = CrossChainAsset {
+            asset_id: "00000000000000000000000000000000".to_string(),
+            asset_denom: asset_denom.clone(),
+            metadata: metadata.clone(),
+        };
+        self.assert_asset_not_registered(&cross_chain_asset);
         let minimum_deposit = utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT
-            + env::storage_byte_cost() * (asset_denom.try_to_vec().unwrap().len() + 32) as u128 * 2;
+            + env::storage_byte_cost()
+                * (32 + cross_chain_asset.try_to_vec().unwrap().len()) as u128;
         assert!(
             env::attached_deposit() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
             minimum_deposit
         );
         let used_bytes = env::storage_usage();
-        if !self.denom_mappings.contains_key(&asset_denom) {
-            // Generate asset id.
-            let mut asset_id =
-                hex::encode(env::sha256(asset_denom.try_to_vec().unwrap().as_slice()))
-                    .get(0..32)
-                    .unwrap()
-                    .to_string();
-            let mut retry: u8 = 0;
-            while self.asset_id_mappings.contains_key(&asset_id) {
-                let mut bytes = asset_denom.try_to_vec().unwrap();
-                bytes.push(retry);
-                asset_id = hex::encode(env::sha256(bytes.as_slice()))
-                    .get(0..32)
-                    .unwrap()
-                    .to_string();
-                retry += 1;
-                assert!(retry < 255, "ERR_TOO_MANY_RETRIES_IN_ASSET_ID_GENERATION");
-            }
-            // Create token contract.
-            let token_contract_id: AccountId =
-                format!("{}.{}", asset_id, env::current_account_id())
-                    .parse()
-                    .unwrap();
-            #[derive(Serialize, Deserialize, Clone)]
-            #[serde(crate = "near_sdk::serde")]
-            struct Input {
-                pub metadata: FungibleTokenMetadata,
-                port_id: String,
-                channel_id: String,
-                trace_path: String,
-                base_denom: String,
-                near_ibc_account: AccountId,
-            }
-            let args = Input {
-                metadata,
-                port_id,
-                channel_id,
-                trace_path,
-                base_denom,
-                near_ibc_account: env::predecessor_account_id(),
-            };
-            let args =
-                near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_FUNCTION");
-            Promise::new(token_contract_id)
-                .create_account()
-                .transfer(utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT)
-                .deploy_contract(
-                    env::storage_read(&StorageKey::TokenContractWasm.try_to_vec().unwrap())
-                        .unwrap(),
-                )
-                .function_call(
-                    "new".to_string(),
-                    args,
-                    0,
-                    utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
-                );
-            // Store mappings.
-            self.asset_id_mappings
-                .insert(asset_id.clone(), asset_denom.clone());
-            self.denom_mappings
-                .insert(asset_denom.clone(), asset_id.clone());
+        ExtraDepositCost::reset();
+        // Generate asset id.
+        let mut asset_id = hex::encode(env::sha256(asset_denom.try_to_vec().unwrap().as_slice()))
+            .get(0..32)
+            .unwrap()
+            .to_string();
+        let mut retry: u8 = 0;
+        while self.asset_id_mappings.contains_key(&asset_id) {
+            let mut bytes = asset_denom.try_to_vec().unwrap();
+            bytes.push(retry);
+            asset_id = hex::encode(env::sha256(bytes.as_slice()))
+                .get(0..32)
+                .unwrap()
+                .to_string();
+            retry += 1;
+            assert!(retry < 255, "ERR_TOO_MANY_RETRIES_IN_ASSET_ID_GENERATION");
         }
+        cross_chain_asset.asset_id = asset_id.clone();
+        // Create token contract.
+        let token_contract_id: AccountId = format!("{}.{}", asset_id, env::current_account_id())
+            .parse()
+            .unwrap();
+        #[derive(Serialize, Deserialize, Clone)]
+        #[serde(crate = "near_sdk::serde")]
+        struct Input {
+            pub metadata: FungibleTokenMetadata,
+            trace_path: String,
+            base_denom: String,
+            near_ibc_account: AccountId,
+        }
+        let args = Input {
+            metadata: metadata.clone(),
+            trace_path,
+            base_denom,
+            near_ibc_account: env::predecessor_account_id(),
+        };
+        let args =
+            near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_FUNCTION");
+        Promise::new(token_contract_id)
+            .create_account()
+            .transfer(utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT)
+            .deploy_contract(
+                env::storage_read(&StorageKey::TokenContractWasm.try_to_vec().unwrap()).unwrap(),
+            )
+            .function_call(
+                "new".to_string(),
+                args,
+                0,
+                utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
+            );
+        ExtraDepositCost::add(utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT);
+        // Store mappings.
+        self.asset_id_mappings
+            .insert(asset_id.clone(), cross_chain_asset.clone());
         // Refund unused deposit.
-        utils::refund_deposit(
-            used_bytes,
-            env::attached_deposit() - utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT,
-        );
+        utils::refund_deposit(used_bytes);
     }
 
     #[payable]
@@ -153,22 +151,38 @@ impl TokenFactory for Contract {
             trace_path,
             base_denom,
         };
-        assert!(
-            self.denom_mappings.contains_key(&asset_denom),
-            "ERR_ASSET_NEEDS_TO_BE_SETUP"
-        );
-        let used_bytes = env::storage_usage();
+        let maybe_asset = self
+            .asset_id_mappings
+            .iter()
+            .find(|asset| asset.1.asset_denom == asset_denom);
+        assert!(maybe_asset.is_some(), "ERR_ASSET_NEEDS_TO_BE_SETUP");
         // Mint tokens.
-        let asset_id = self.denom_mappings.get(&asset_denom).unwrap();
-        let token_contract_id: AccountId = format!("{}.{}", asset_id, env::current_account_id())
-            .parse()
-            .unwrap();
+        let token_contract_id: AccountId =
+            format!("{}.{}", maybe_asset.unwrap().0, env::current_account_id())
+                .parse()
+                .unwrap();
         ext_wrapped_token::ext(token_contract_id)
             .with_attached_deposit(env::attached_deposit())
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 3)
             .with_unused_gas_weight(0)
             .mint(token_owner, amount);
-        utils::refund_deposit(used_bytes, env::attached_deposit());
+    }
+}
+
+/// View functions.
+pub trait Viewer {
+    /// Get all cross chain assets.
+    fn get_cross_chain_assets(&self) -> Vec<CrossChainAsset>;
+}
+
+#[near_bindgen]
+impl Viewer for Contract {
+    fn get_cross_chain_assets(&self) -> Vec<CrossChainAsset> {
+        let mut assets = Vec::new();
+        for asset in self.asset_id_mappings.values() {
+            assets.push(asset.clone());
+        }
+        assets
     }
 }
 

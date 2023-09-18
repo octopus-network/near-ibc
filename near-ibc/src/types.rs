@@ -33,3 +33,11 @@ pub struct QueryPacketEventDataRequest {
     pub sequences: Vec<Sequence>,
     pub height: Qualified<QueryHeight>,
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub enum ProcessingResult {
+    NeedMoreGas,
+    Ok,
+    Error(String),
+}

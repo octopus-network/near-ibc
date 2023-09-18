@@ -27,8 +27,9 @@ use ibc::{
     },
 };
 use near_sdk::{env, json_types::U128, log};
-use utils::interfaces::{
-    ext_channel_escrow, ext_process_transfer_request_callback, ext_token_factory,
+use utils::{
+    interfaces::{ext_channel_escrow, ext_process_transfer_request_callback, ext_token_factory},
+    ExtraDepositCost,
 };
 
 impl TokenTransferExecutionContext for TransferModule {
@@ -40,27 +41,34 @@ impl TokenTransferExecutionContext for TransferModule {
     ) -> Result<(), TokenTransferError> {
         let sender_id = from.0.to_string();
         let receiver_id = to.0.to_string();
+        let trace_path = amt.denom.trace_path.to_string();
         let base_denom = amt.denom.base_denom.to_string();
-        if receiver_id.ends_with(env::current_account_id().as_str()) {
+        let prefixed_ef = format!(".ef.transfer.{}", env::current_account_id());
+        if receiver_id.ends_with(prefixed_ef.as_str()) {
             ext_process_transfer_request_callback::ext(to.0.clone())
                 .with_attached_deposit(0)
                 .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
                 .with_unused_gas_weight(0)
                 .apply_transfer_request(
+                    trace_path,
                     base_denom,
                     from.0.clone(),
                     U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
                 );
-        } else if sender_id.ends_with(env::current_account_id().as_str()) {
+        } else if sender_id.ends_with(prefixed_ef.as_str()) {
             ext_channel_escrow::ext(from.0.clone())
                 .with_attached_deposit(1)
-                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
                 .with_unused_gas_weight(0)
                 .do_transfer(
+                    trace_path,
                     base_denom,
                     to.0.clone(),
                     U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
                 );
+            ExtraDepositCost::add(1);
+        } else {
+            panic!("Neither sender nor receiver is an escrow account. This should not happen.");
         }
         Ok(())
     }
@@ -77,7 +85,7 @@ impl TokenTransferExecutionContext for TransferModule {
             amt.denom.base_denom
         );
         ext_token_factory::ext(utils::get_token_factory_contract_id())
-            .with_attached_deposit(env::attached_deposit())
+            .with_attached_deposit(utils::STORAGE_DEPOSIT_FOR_MINT_TOKEN)
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 8)
             .with_unused_gas_weight(0)
             .mint_asset(
@@ -86,6 +94,7 @@ impl TokenTransferExecutionContext for TransferModule {
                 account.0.clone(),
                 U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),
             );
+        ExtraDepositCost::add(utils::STORAGE_DEPOSIT_FOR_MINT_TOKEN);
         Ok(())
     }
 
@@ -105,6 +114,7 @@ impl TokenTransferExecutionContext for TransferModule {
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
             .with_unused_gas_weight(0)
             .apply_transfer_request(
+                amt.denom.trace_path.to_string(),
                 amt.denom.base_denom.to_string(),
                 account.0.clone(),
                 U128(u128::from_str(amt.amount.to_string().as_str()).unwrap()),

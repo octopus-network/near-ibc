@@ -97,7 +97,8 @@ impl ClientExecutionContext for NearIbcStore {
             .map(|heights| {
                 heights.push_back(
                     Height::new(consensus_state_path.epoch, consensus_state_path.height).unwrap(),
-                )
+                );
+                heights.flush();
             });
         Ok(())
     }
@@ -137,8 +138,9 @@ impl ExecutionContext for NearIbcStore {
         }
         self.client_processed_times
             .get_mut(&client_id)
-            .and_then(|processed_times| {
-                Some(processed_times.push_back((height, timestamp.nanoseconds())))
+            .map(|processed_times| {
+                processed_times.push_back((height, timestamp.nanoseconds()));
+                processed_times.flush();
             });
         Ok(())
     }
@@ -171,7 +173,10 @@ impl ExecutionContext for NearIbcStore {
         }
         self.client_processed_heights
             .get_mut(&client_id)
-            .and_then(|processed_heights| Some(processed_heights.push_back((height, host_height))));
+            .map(|processed_heights| {
+                processed_heights.push_back((height, host_height));
+                processed_heights.flush();
+            });
         Ok(())
     }
 
@@ -281,6 +286,7 @@ impl ExecutionContext for NearIbcStore {
             ))
             .map(|sequences| {
                 sequences.remove(&commitment_path.sequence);
+                sequences.flush();
             });
         Ok(())
     }
@@ -348,6 +354,7 @@ impl ExecutionContext for NearIbcStore {
             .get_mut(&(ack_path.port_id.clone(), ack_path.channel_id.clone()))
             .map(|sequences| {
                 sequences.remove(&ack_path.sequence);
+                sequences.flush();
             });
         Ok(())
     }
@@ -459,5 +466,6 @@ fn record_packet_sequence(
     }
     lookup_sets.get_mut(&key).map(|sequences| {
         sequences.insert(sequence.clone());
+        sequences.flush();
     });
 }
