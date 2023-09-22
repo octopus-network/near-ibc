@@ -297,8 +297,9 @@ impl Contract {
 impl TransferRequestHandler for Contract {
     fn process_transfer_request(&mut self, transfer_request: Ics20TransferRequest) {
         utils::assert_sub_account();
+        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
         if let Err(e) = send_transfer(
-            &mut TransferModule(),
+            &mut near_ibc_store,
             &mut TransferModule(),
             MsgTransfer {
                 port_id_on_a: PortId::from_str(transfer_request.port_on_a.as_str()).unwrap(),
@@ -346,6 +347,7 @@ impl TransferRequestHandler for Contract {
                     transfer_request.amount,
                 );
         }
+        self.near_ibc_store.set(&near_ibc_store);
     }
 }
 
