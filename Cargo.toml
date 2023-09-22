@@ -19,6 +19,5 @@ panic = "abort"
 overflow-checks = true
 
 [patch.crates-io]
-ibc = { git = "https://github.com/octopus-network/ibc-rs.git", branch = "octopus-relayer" }
-ibc-proto = { git = "https://github.com/octopus-network/ibc-proto-rs.git", branch = "octopus-relayer" }
-# ics23 = { git = "https://github.com/octopus-network/ics23.git", branch = "for-near-ibc-pre2" }
+ibc = { git = "https://github.com/octopus-network/ibc-rs.git", branch = "down-borsh-version" }
+ibc-proto = { git = "https://github.com/octopus-network/ibc-proto-rs.git", branch = "down-borsh-version" }
