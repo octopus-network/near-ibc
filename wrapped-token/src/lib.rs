@@ -27,7 +27,7 @@ use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     collections::LazyOption,
     env,
-    json_types::U128,
+    json_types::{U128, U64},
     near_bindgen,
     store::UnorderedMap,
     AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseOrValue,
@@ -117,7 +117,12 @@ impl Contract {
     /// This function is called by a certain token holder, when he/she wants to redeem
     /// the token on NEAR protocol back to the source chain. It will send
     /// a transfer plan to the IBC/TAO implementation.
-    pub fn request_transfer(&mut self, receiver_id: String, amount: U128) {
+    pub fn request_transfer(
+        &mut self,
+        receiver_id: String,
+        amount: U128,
+        timeout_seconds: Option<U64>,
+    ) {
         assert!(amount.0 > 0, "ERR_AMOUNT_MUST_BE_GREATER_THAN_ZERO");
         let sender_id = env::predecessor_account_id();
         assert!(
@@ -141,6 +146,7 @@ impl Contract {
             amount,
             sender: sender_id.to_string(),
             receiver: receiver_id,
+            timeout_seconds,
         };
         ext_transfer_request_handler::ext(self.near_ibc_account.clone())
             .with_attached_deposit(0)

@@ -62,6 +62,8 @@ pub mod types;
 pub mod viewer;
 
 pub const VERSION: &str = "v1.0.0-pre.4";
+/// The default timeout seconds for the `MsgTransfer` message.
+pub const DEFAULT_TIMEOUT_SECONDS: u64 = 1000;
 
 #[derive(BorshDeserialize, BorshSerialize, BorshStorageKey, Clone)]
 pub enum StorageKey {
@@ -298,6 +300,9 @@ impl TransferRequestHandler for Contract {
     fn process_transfer_request(&mut self, transfer_request: Ics20TransferRequest) {
         utils::assert_sub_account();
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
+        let timeout_seconds = transfer_request
+            .timeout_seconds
+            .map_or_else(|| DEFAULT_TIMEOUT_SECONDS, |value| value.0);
         if let Err(e) = send_transfer(
             &mut near_ibc_store,
             &mut TransferModule(),
@@ -323,7 +328,7 @@ impl TransferRequestHandler for Contract {
                 },
                 timeout_height_on_b: TimeoutHeight::Never {},
                 timeout_timestamp_on_b: Timestamp::from_nanoseconds(
-                    env::block_timestamp() + 1000 * 1000000000,
+                    env::block_timestamp() + timeout_seconds * 1000000000,
                 )
                 .unwrap(),
             },

@@ -20,7 +20,7 @@ use near_contract_standards::fungible_token::core::ext_ft_core;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env,
-    json_types::U128,
+    json_types::{U128, U64},
     near_bindgen,
     serde::{Deserialize, Serialize},
     serde_json,
@@ -45,6 +45,8 @@ pub enum StorageKey {
 #[serde(crate = "near_sdk::serde")]
 pub struct FtOnTransferMsg {
     pub receiver: String,
+    #[serde(default)]
+    pub timeout_seconds: Option<U64>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -112,6 +114,7 @@ impl Contract {
             amount,
             sender: sender_id.to_string(),
             receiver: msg.receiver,
+            timeout_seconds: msg.timeout_seconds,
         };
         ext_transfer_request_handler::ext(self.near_ibc_account())
             .with_attached_deposit(0)

@@ -2,7 +2,7 @@ use crate::prelude::*;
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    json_types::U128,
+    json_types::{U128, U64},
     serde::{Deserialize, Serialize},
 };
 
@@ -33,4 +33,5 @@ pub struct Ics20TransferRequest {
     pub amount: U128,
     pub sender: String,
     pub receiver: String,
+    pub timeout_seconds: Option<U64>,
 }
