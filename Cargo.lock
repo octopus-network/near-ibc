@@ -720,7 +720,7 @@ dependencies = [
 [[package]]
 name = "ibc"
 version = "0.45.0"
-source = "git+https://github.com/octopus-network/ibc-rs.git?branch=down-borsh-version#83f0cd7bd94e98537b4a45008b9ed5a7c61bdcf4"
+source = "git+https://github.com/octopus-network/ibc-rs.git?branch=v0.45.0-octopus-for-near-ibc#cfd7723bd0e15debeaad3d1cc2b265f34ea58a76"
 dependencies = [
  "borsh",
  "bytes",
@@ -749,7 +749,7 @@ dependencies = [
 [[package]]
 name = "ibc-derive"
 version = "0.3.0"
-source = "git+https://github.com/octopus-network/ibc-rs.git?branch=down-borsh-version#83f0cd7bd94e98537b4a45008b9ed5a7c61bdcf4"
+source = "git+https://github.com/octopus-network/ibc-rs.git?branch=v0.45.0-octopus-for-near-ibc#cfd7723bd0e15debeaad3d1cc2b265f34ea58a76"
 dependencies = [
  "darling",
  "proc-macro2",
