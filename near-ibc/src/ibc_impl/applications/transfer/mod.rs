@@ -18,9 +18,7 @@ use ibc::{
 use ibc_proto::ibc::apps::transfer::v2::FungibleTokenPacketData;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    log,
-    serde::{Deserialize, Serialize},
-    serde_json, AccountId,
+    log, serde_json, AccountId,
 };
 
 pub mod impls;
@@ -147,12 +145,11 @@ impl Module for TransferModule {
             "Received packet: {:?}",
             String::from_utf8(packet.data.to_vec()).expect("Invalid packet data")
         );
-        let ft_packet_data =
-            serde_json::from_slice::<FtPacketData>(&packet.data).expect("Invalid packet data");
+        let ft_packet_data = serde_json::from_slice::<FungibleTokenPacketData>(&packet.data)
+            .expect("Invalid packet data");
         let maybe_ft_packet = Packet {
             data: serde_json::to_string(
-                &PacketData::try_from(FungibleTokenPacketData::from(ft_packet_data))
-                    .expect("Invalid packet data"),
+                &PacketData::try_from(ft_packet_data).expect("Invalid packet data"),
             )
             .expect("Invalid packet data")
             .into_bytes(),
@@ -283,32 +280,5 @@ impl TryFrom<Signer> for AccountIdConversion {
         Ok(AccountIdConversion(
             AccountId::from_str(value.as_ref()).map_err(|_| "invalid signer")?,
         ))
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(crate = "near_sdk::serde")]
-pub struct FtPacketData {
-    /// the token denomination to be transferred
-    pub denom: String,
-    /// the token amount to be transferred
-    pub amount: String,
-    /// the sender address
-    pub sender: String,
-    /// the recipient address on the destination chain
-    pub receiver: String,
-    /// optional memo
-    pub memo: String,
-}
-
-impl From<FtPacketData> for FungibleTokenPacketData {
-    fn from(value: FtPacketData) -> Self {
-        FungibleTokenPacketData {
-            denom: value.denom,
-            amount: value.amount,
-            sender: value.sender,
-            receiver: value.receiver,
-            memo: value.memo,
-        }
     }
 }
