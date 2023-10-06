@@ -1,6 +1,6 @@
-use crate::{types::ProcessingResult, *};
-
 use super::IndexedAscendingQueueViewer;
+use crate::{types::ProcessingResult, *};
+use core::fmt::Debug;
 
 /// A indexed ascending lookup queue.
 ///
@@ -37,8 +37,8 @@ where
 /// Implement change functions for `IndexedLookupQueue`.
 impl<K, V> IndexedAscendingLookupQueue<K, V>
 where
-    K: BorshDeserialize + BorshSerialize + Clone + Ord,
-    V: BorshDeserialize + BorshSerialize + Clone,
+    K: BorshDeserialize + BorshSerialize + Clone + Ord + Debug,
+    V: BorshDeserialize + BorshSerialize + Clone + Debug,
 {
     ///
     pub fn new(
@@ -90,7 +90,16 @@ where
     pub fn push_back(&mut self, element: (K, V)) {
         assert!(
             self.end_index == 0 || &element.0 > self.index_map.get(&self.end_index).unwrap(),
-            "The key to be added should be larger than the latest key in the queue."
+            "Invalid element to add, key: {:?}, value: {:?}. \
+            The key to be added should be larger than the latest key in the queue. \
+            Current index range of queue: {} - {}, index_map_storage_key_prefix: {:?}, \
+            value_map_storage_key_prefix: {:?}",
+            element.0,
+            element.1,
+            self.start_index,
+            self.end_index,
+            self.index_map_storage_key_prefix,
+            self.value_map_storage_key_prefix,
         );
         self.index_map.insert(self.end_index + 1, element.0.clone());
         self.value_map.insert(element.0, element.1);

@@ -65,7 +65,7 @@ pub const VERSION: &str = "v1.0.0-pre.4";
 /// The default timeout seconds for the `MsgTransfer` message.
 pub const DEFAULT_TIMEOUT_SECONDS: u64 = 1000;
 
-#[derive(BorshDeserialize, BorshSerialize, BorshStorageKey, Clone)]
+#[derive(BorshDeserialize, BorshSerialize, BorshStorageKey, Clone, Debug)]
 pub enum StorageKey {
     NearIbcStore,
     PortToModule,
@@ -142,19 +142,24 @@ impl Contract {
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
         let mut router = self.near_ibc_store.get().unwrap();
 
-        let errors = messages.into_iter().fold(vec![], |mut errors, msg| {
-            match MsgEnvelope::try_from(msg) {
-                Ok(msg) => match ibc::core::dispatch(&mut near_ibc_store, &mut router, msg) {
-                    Ok(()) => (),
-                    Err(e) => errors.push(e),
-                },
-                Err(e) => errors.push(e),
+        messages.into_iter().fold(vec![], |mut errors, msg| {
+            match MsgEnvelope::try_from(msg.clone()) {
+                Ok(msg) => {
+                    match ibc::core::dispatch(&mut near_ibc_store, &mut router, msg.clone()) {
+                        Ok(()) => (),
+                        Err(e) => {
+                            log!("Error occurred in processing message: {:?}, {:?}", msg, e);
+                            errors.push(e)
+                        }
+                    }
+                }
+                Err(e) => {
+                    log!("Error occurred in routing message: {:?}, {:?}", msg, e);
+                    errors.push(e)
+                }
             }
             errors
         });
-        if errors.len() > 0 {
-            log!("Error(s) occurred: {:?}", errors);
-        }
         near_ibc_store.flush();
         self.near_ibc_store.set(&near_ibc_store);
         // Refund unused deposit.
