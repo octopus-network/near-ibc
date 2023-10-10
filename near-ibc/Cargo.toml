@@ -17,3 +17,6 @@ serde = "1.0"
 getrandom = { version = "0.2", features = ["custom"] }
 token-factory = { path = "../token-factory" }
 utils = { path = "../utils" }
+tendermint = { version = "0.33" }
+hex = "0.4"
+octopus-lpos = { path = "/Users/yangzhen/workspace/octopus-network/octopus-lpos-ibc/octopus-lpos" }

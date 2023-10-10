@@ -25,7 +25,7 @@ use ibc::{
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env, log,
-    store::{LookupMap, UnorderedSet},
+    store::{LookupMap, UnorderedSet}, AccountId,
 };
 
 pub type NearTimeStamp = u64;
@@ -86,9 +86,9 @@ impl Debug for NearIbcStore {
 
 impl NearIbcStore {
     ///
-    pub fn new() -> Self {
+    pub fn new(appchain_registry_account: AccountId) -> Self {
         Self {
-            module_holder: ModuleHolder::new(),
+            module_holder: ModuleHolder::new(appchain_registry_account),
             client_id_set: UnorderedSet::new(StorageKey::ClientIdSet),
             client_counter: 0,
             client_processed_times: LookupMap::new(StorageKey::ClientProcessedTimes),

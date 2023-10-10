@@ -533,6 +533,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "eyre"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c2b6b5a29c02cdc822728b7d7b8ae1bab3e3b05d44522770ddd49722eeac7eb"
+dependencies = [
+ "indenter",
+ "once_cell",
+]
+
+[[package]]
 name = "fixed-hash"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -559,6 +569,7 @@ version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c606d892c9de11507fa0dcffc116434f94e105d0bbdc4e405b61519464c49d7b"
 dependencies = [
+ "eyre",
  "paste",
 ]
 
@@ -826,6 +837,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "indenter"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce23b50ad8242c51a442f3ff322d56b02f08852c77e4c0b4d3fd684abc89c683"
+
+[[package]]
 name = "indexmap"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -976,13 +993,16 @@ name = "near-ibc"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.2.10",
+ "hex",
  "ibc",
  "ibc-proto",
  "itertools",
  "near-contract-standards",
  "near-sdk",
+ "octopus-lpos",
  "serde",
  "sha2 0.10.7",
+ "tendermint",
  "token-factory",
  "utils",
 ]
@@ -1182,6 +1202,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f30b0abd723be7e2ffca1272140fac1a2f084c77ec3e123c192b66af1ee9e6c2"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "octopus-lpos"
+version = "0.1.0"
+dependencies = [
+ "displaydoc",
+ "ibc",
+ "ibc-proto",
+ "serde",
+ "serde_json",
+ "tendermint",
+ "tendermint-proto",
 ]
 
 [[package]]
@@ -1869,6 +1902,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17f6bb557fd245c28e6411aa56b6403c689ad95061f50e4be16c274e70a17e48"
 dependencies = [
  "deranged",
+ "serde",
  "time-core",
  "time-macros",
 ]
