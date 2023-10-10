@@ -199,7 +199,7 @@ impl Contract {
         };
         let minimum_deposit = utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT
             + env::storage_byte_cost()
-                * (32 + cross_chain_asset.try_to_vec().unwrap().len()) as u128;
+                * ((32 + cross_chain_asset.try_to_vec().unwrap().len()) * 2) as u128;
         assert!(
             env::attached_deposit() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",

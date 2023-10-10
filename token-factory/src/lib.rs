@@ -14,16 +14,20 @@ use utils::{
     ExtraDepositCost,
 };
 
+mod migration;
+
 #[derive(BorshSerialize, BorshStorageKey)]
 pub enum StorageKey {
     TokenContractWasm,
     AssetIdMappings,
+    AssetDenomMappings,
 }
 
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
 pub struct Contract {
     asset_id_mappings: UnorderedMap<String, CrossChainAsset>,
+    asset_denom_mappings: UnorderedMap<AssetDenom, String>,
 }
 
 #[near_bindgen]
@@ -38,6 +42,7 @@ impl Contract {
         );
         Self {
             asset_id_mappings: UnorderedMap::new(StorageKey::AssetIdMappings),
+            asset_denom_mappings: UnorderedMap::new(StorageKey::AssetDenomMappings),
         }
     }
     ///
@@ -71,14 +76,6 @@ impl TokenFactory for Contract {
             metadata: metadata.clone(),
         };
         self.assert_asset_not_registered(&cross_chain_asset);
-        let minimum_deposit = utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT
-            + env::storage_byte_cost()
-                * (32 + cross_chain_asset.try_to_vec().unwrap().len()) as u128;
-        assert!(
-            env::attached_deposit() >= minimum_deposit,
-            "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
-            minimum_deposit
-        );
         let used_bytes = env::storage_usage();
         ExtraDepositCost::reset();
         // Generate asset id.
@@ -134,6 +131,7 @@ impl TokenFactory for Contract {
         // Store mappings.
         self.asset_id_mappings
             .insert(asset_id.clone(), cross_chain_asset.clone());
+        self.asset_denom_mappings.insert(asset_denom, asset_id);
         // Refund unused deposit.
         utils::refund_deposit(used_bytes);
     }
@@ -151,16 +149,14 @@ impl TokenFactory for Contract {
             trace_path,
             base_denom,
         };
-        let maybe_asset = self
-            .asset_id_mappings
-            .iter()
-            .find(|asset| asset.1.asset_denom == asset_denom);
-        assert!(maybe_asset.is_some(), "ERR_ASSET_NEEDS_TO_BE_SETUP");
+        let asset_id = self
+            .asset_denom_mappings
+            .get(&asset_denom)
+            .expect("ERR_ASSET_NEEDS_TO_BE_SETUP");
         // Mint tokens.
-        let token_contract_id: AccountId =
-            format!("{}.{}", maybe_asset.unwrap().0, env::current_account_id())
-                .parse()
-                .unwrap();
+        let token_contract_id: AccountId = format!("{}.{}", asset_id, env::current_account_id())
+            .parse()
+            .unwrap();
         ext_wrapped_token::ext(token_contract_id)
             .with_attached_deposit(env::attached_deposit())
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 3)
@@ -172,14 +168,19 @@ impl TokenFactory for Contract {
 /// View functions.
 pub trait Viewer {
     /// Get all cross chain assets.
-    fn get_cross_chain_assets(&self) -> Vec<CrossChainAsset>;
+    fn get_cross_chain_assets(&self, trace_path: Option<String>) -> Vec<CrossChainAsset>;
 }
 
 #[near_bindgen]
 impl Viewer for Contract {
-    fn get_cross_chain_assets(&self) -> Vec<CrossChainAsset> {
+    fn get_cross_chain_assets(&self, trace_path: Option<String>) -> Vec<CrossChainAsset> {
         let mut assets = Vec::new();
         for asset in self.asset_id_mappings.values() {
+            if let Some(trace_path) = &trace_path {
+                if !asset.asset_denom.trace_path.eq(trace_path) {
+                    continue;
+                }
+            }
             assets.push(asset.clone());
         }
         assets
