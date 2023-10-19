@@ -95,7 +95,7 @@ impl ValidationContext for NearIbcStore {
     }
 
     fn host_height(&self) -> Result<Height, ContextError> {
-        Height::new(0, env::block_height()).map_err(|e| ContextError::ClientError(e))
+        Height::new(0, env::block_height()).map_err(ContextError::ClientError)
     }
 
     fn host_timestamp(&self) -> Result<Timestamp, ContextError> {
@@ -108,7 +108,8 @@ impl ValidationContext for NearIbcStore {
         _height: &Height,
     ) -> Result<Self::AnyConsensusState, ContextError> {
         Err(ContextError::ClientError(ClientError::ClientSpecific {
-            description: format!("The `host_consensus_state` is not supported on NEAR protocol."),
+            description: "The `host_consensus_state` is not supported on NEAR protocol."
+                .to_string(),
         }))
     }
 
@@ -303,7 +304,7 @@ impl ValidationContext for NearIbcStore {
         self.client_processed_heights
             .get(client_id)
             .and_then(|processed_heights| processed_heights.get_value_by_key(height))
-            .map(|height: &Height| height.clone())
+            .copied()
             .ok_or_else(|| {
                 ContextError::ClientError(ClientError::Other {
                     description: format!(
@@ -335,6 +336,6 @@ impl ValidationContext for NearIbcStore {
     }
 
     fn get_client_validation_context(&self) -> &Self::ClientValidationContext {
-        &self
+        self
     }
 }

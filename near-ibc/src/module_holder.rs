@@ -24,3 +24,9 @@ impl ModuleHolder {
         }
     }
 }
+
+impl Default for ModuleHolder {
+    fn default() -> Self {
+        Self::new()
+    }
+}

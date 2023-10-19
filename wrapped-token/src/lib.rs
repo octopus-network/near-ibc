@@ -78,7 +78,7 @@ impl Contract {
         near_ibc_account: AccountId,
     ) -> Self {
         let account_id = String::from(env::current_account_id().as_str());
-        let parts = account_id.split(".").collect::<Vec<&str>>();
+        let parts = account_id.split('.').collect::<Vec<&str>>();
         assert!(
             parts.len() > 3,
             "ERR_CONTRACT_MUST_BE_DEPLOYED_IN_SUB_ACCOUNT_OF_FACTORY",
@@ -177,17 +177,17 @@ impl Contract {
         amount: U128,
     ) {
         assert!(
-            self.pending_transfer_requests.contains_key(&account_id),
+            self.pending_transfer_requests.contains_key(account_id),
             "ERR_NO_PENDING_TRANSFER_REQUEST"
         );
-        let req = self.pending_transfer_requests.get(&account_id).unwrap();
+        let req = self.pending_transfer_requests.get(account_id).unwrap();
         assert!(
             req.amount == amount
                 && req.token_denom.eq(base_denom)
                 && req.token_trace_path.eq(trace_path),
             "ERR_PENDING_TRANSFER_REQUEST_NOT_MATCHED"
         );
-        self.pending_transfer_requests.remove(&account_id);
+        self.pending_transfer_requests.remove(account_id);
     }
 }
 
@@ -294,19 +294,14 @@ impl NearIbcAccountAssertion for Contract {
 impl Contract {
     ///
     pub fn get_pending_accounts(&self) -> Vec<AccountId> {
-        self.pending_transfer_requests
-            .keys()
-            .map(|account_id| account_id.clone())
-            .collect()
+        self.pending_transfer_requests.keys().cloned().collect()
     }
     ///
     pub fn get_pending_transfer_request_of(
         &self,
         account_id: AccountId,
     ) -> Option<Ics20TransferRequest> {
-        self.pending_transfer_requests
-            .get(&account_id)
-            .map(|req| req.clone())
+        self.pending_transfer_requests.get(&account_id).cloned()
     }
 }
 

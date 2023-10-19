@@ -121,9 +121,7 @@ impl Viewer for Contract {
 
     fn get_connection_end(&self, connection_id: ConnectionId) -> Option<ConnectionEnd> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
-        near_ibc_store
-            .connection_end(&connection_id)
-            .map_or(None, |ce| Some(ce))
+        near_ibc_store.connection_end(&connection_id).ok()
     }
 
     fn get_connection_ends(&self) -> Vec<(ConnectionId, ConnectionEnd)> {
@@ -134,7 +132,7 @@ impl Viewer for Contract {
             .map(|connection_id| {
                 (
                     connection_id.clone(),
-                    near_ibc_store.connection_end(&connection_id).unwrap(),
+                    near_ibc_store.connection_end(connection_id).unwrap(),
                 )
             })
             .collect()
@@ -144,12 +142,12 @@ impl Viewer for Contract {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
             .channel_end(&ChannelEndPath::new(&port_id, &channel_id))
-            .map_or(None, |ce| Some(ce))
+            .ok()
     }
 
     fn get_client_state(&self, client_id: ClientId) -> Vec<u8> {
         let client_state_key = ClientStatePath(client_id.clone()).to_string().into_bytes();
-        env::storage_read(&client_state_key).unwrap_or(vec![])
+        env::storage_read(&client_state_key).unwrap_or_default()
     }
 
     fn get_client_consensus_heights(&self, client_id: ClientId) -> Vec<Height> {
@@ -157,24 +155,21 @@ impl Viewer for Contract {
         near_ibc_store
             .client_consensus_state_height_sets
             .get(&client_id)
-            .map_or_else(
-                || Vec::new(),
-                |heights| {
-                    heights
-                        .keys()
-                        .iter()
-                        .filter(|height| height.is_some())
-                        .map(|height| height.unwrap().clone())
-                        .collect()
-                },
-            )
+            .map_or_else(Vec::new, |heights| {
+                heights
+                    .keys()
+                    .iter()
+                    .filter(|height| height.is_some())
+                    .map(|height| *height.unwrap())
+                    .collect()
+            })
     }
 
     fn get_client_consensus(&self, client_id: ClientId, consensus_height: Height) -> Vec<u8> {
         let consensus_state_key = ClientConsensusStatePath::new(&client_id, &consensus_height)
             .to_string()
             .into_bytes();
-        env::storage_read(&consensus_state_key).unwrap_or(vec![])
+        env::storage_read(&consensus_state_key).unwrap_or_default()
     }
 
     fn get_packet_receipt(
@@ -199,10 +194,10 @@ impl Viewer for Contract {
         let stored_sequences = near_ibc_store
             .packet_receipt_sequence_sets
             .get(&(port_id, channel_id))
-            .map_or_else(|| vec![], |receipts| receipts.iter().collect());
+            .map_or_else(Vec::new, |receipts| receipts.iter().collect());
         sequences
             .iter()
-            .filter(|sequence| !stored_sequences.contains(&sequence))
+            .filter(|sequence| !stored_sequences.contains(sequence))
             .cloned()
             .collect()
     }
@@ -239,7 +234,7 @@ impl Viewer for Contract {
             .into_bytes();
         env::storage_read(&key)
             .map(|bytes| ConnectionIds::try_from_slice(&bytes).unwrap().0)
-            .unwrap_or(vec![])
+            .unwrap_or_default()
     }
 
     fn get_connection_channels(&self, connection_id: ConnectionId) -> Vec<IdentifiedChannelEnd> {
@@ -249,7 +244,7 @@ impl Viewer for Contract {
             .iter()
             .filter(|(port_id, channel_id)| {
                 near_ibc_store
-                    .channel_end(&ChannelEndPath::new(&port_id, &channel_id))
+                    .channel_end(&ChannelEndPath::new(port_id, channel_id))
                     .map_or(false, |channel_end| {
                         channel_end.connection_hops.contains(&connection_id)
                     })
@@ -258,7 +253,7 @@ impl Viewer for Contract {
                 port_id: port_id.clone(),
                 channel_id: channel_id.clone(),
                 channel_end: near_ibc_store
-                    .channel_end(&ChannelEndPath::new(&port_id, &channel_id))
+                    .channel_end(&ChannelEndPath::new(port_id, channel_id))
                     .unwrap(),
             })
             .collect()
@@ -273,7 +268,7 @@ impl Viewer for Contract {
                 port_id: port_id.clone(),
                 channel_id: channel_id.clone(),
                 channel_end: near_ibc_store
-                    .channel_end(&ChannelEndPath::new(&port_id, &channel_id))
+                    .channel_end(&ChannelEndPath::new(port_id, channel_id))
                     .unwrap(),
             })
             .collect()
@@ -288,7 +283,7 @@ impl Viewer for Contract {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
             .get_packet_commitment(&CommitmentPath::new(&port_id, &channel_id, sequence))
-            .map_or(None, |commitment| Some(commitment))
+            .ok()
     }
 
     fn get_packet_commitment_sequences(
@@ -300,9 +295,7 @@ impl Viewer for Contract {
         near_ibc_store
             .packet_commitment_sequence_sets
             .get(&(port_id.clone(), channel_id.clone()))
-            .map_or(vec![], |sequences| {
-                sequences.iter().map(|seq| seq.clone()).collect()
-            })
+            .map_or(vec![], |sequences| sequences.iter().copied().collect())
     }
 
     fn get_next_sequence_receive(
@@ -313,7 +306,7 @@ impl Viewer for Contract {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
             .get_next_sequence_recv(&SeqRecvPath::new(&port_id, &channel_id))
-            .map_or(None, |sq| Some(sq))
+            .ok()
     }
 
     fn get_packet_acknowledgement(
@@ -325,7 +318,7 @@ impl Viewer for Contract {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
             .get_packet_acknowledgement(&AckPath::new(&port_id, &channel_id, sequence))
-            .map_or(None, |ack| Some(ack))
+            .ok()
     }
 
     fn get_packet_acknowledgement_sequences(
@@ -337,9 +330,7 @@ impl Viewer for Contract {
         near_ibc_store
             .packet_acknowledgement_sequence_sets
             .get(&(port_id.clone(), channel_id.clone()))
-            .map_or(vec![], |sequences| {
-                sequences.iter().map(|seq| seq.clone()).collect()
-            })
+            .map_or(vec![], |sequences| sequences.iter().copied().collect())
     }
 
     fn get_commitment_prefix(&self) -> Vec<u8> {
@@ -369,18 +360,17 @@ impl Viewer for Contract {
                     .ibc_events_history
                     .keys()
                     .iter()
-                    .filter(|key| key.is_some())
-                    .map(|key| key.unwrap())
-                    .filter(|key| *key <= height)
+                    .flatten()
+                    .filter(|key| *key <= &height)
                     .for_each(|key| {
                         gether_ibc_events_with_height(
                             &mut result,
                             key,
                             near_ibc_store
                                 .ibc_events_history
-                                .get_value_by_key(&key)
-                                .map(|events| events.clone())
-                                .unwrap_or_else(|| vec![]),
+                                .get_value_by_key(key)
+                                .cloned()
+                                .unwrap_or_else(Vec::new),
                             &request,
                         );
                     });
@@ -388,9 +378,9 @@ impl Viewer for Contract {
         } else {
             let ibc_events = near_ibc_store
                 .ibc_events_history
-                .get_value_by_key(&target_height.unwrap())
-                .map(|events| events.clone())
-                .unwrap_or_else(|| vec![]);
+                .get_value_by_key(target_height.unwrap())
+                .cloned()
+                .unwrap_or_else(Vec::new);
             gether_ibc_events_with_height(&mut result, target_height.unwrap(), ibc_events, &request)
         }
         result
@@ -403,7 +393,7 @@ impl Viewer for Contract {
             .keys()
             .iter()
             .filter(|h| h.is_some())
-            .map(|h| h.unwrap().clone())
+            .map(|h| *h.unwrap())
             .collect()
     }
 
@@ -412,8 +402,8 @@ impl Viewer for Contract {
         near_ibc_store
             .ibc_events_history
             .get_value_by_key(&height)
-            .map(|events| events.clone())
-            .unwrap_or_else(|| vec![])
+            .cloned()
+            .unwrap_or_else(Vec::new)
     }
 }
 
@@ -438,18 +428,18 @@ fn gether_ibc_events_with_height(
                     && request
                         .destination_channel_id
                         .eq(receive_packet.chan_id_on_a())
-                    && request.sequences.contains(&receive_packet.seq_on_b())
+                    && request.sequences.contains(receive_packet.seq_on_b())
             }
             IbcEvent::WriteAcknowledgement(write_ack) => {
                 request.source_port_id.eq(write_ack.port_id_on_a())
                     && request.source_channel_id.eq(write_ack.chan_id_on_a())
                     && request.destination_port_id.eq(write_ack.port_id_on_b())
                     && request.destination_channel_id.eq(write_ack.chan_id_on_b())
-                    && request.sequences.contains(&write_ack.seq_on_a())
+                    && request.sequences.contains(write_ack.seq_on_a())
             }
             _ => false,
         })
-        .map(|event| event.clone())
+        .cloned()
         .collect_vec();
-    result.push((height.clone(), events));
+    result.push((*height, events));
 }

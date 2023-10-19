@@ -68,8 +68,7 @@ pub trait NearIbcStoreHost {
     fn get_near_ibc_store() -> NearIbcStore {
         let store =
             near_sdk::env::storage_read(&StorageKey::NearIbcStore.try_to_vec().unwrap()).unwrap();
-        let store = NearIbcStore::try_from_slice(&store).unwrap();
-        store
+        NearIbcStore::try_from_slice(&store).unwrap()
     }
     ///
     fn set_near_ibc_store(store: &NearIbcStore) {
@@ -81,6 +80,12 @@ pub trait NearIbcStoreHost {
 impl Debug for NearIbcStore {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(f, "NearIbcStore {{ ... }}")
+    }
+}
+
+impl Default for NearIbcStore {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -133,19 +138,17 @@ impl NearIbcStore {
                 .to_string()
                 .into_bytes(),
         );
-        self.client_consensus_state_height_sets
-            .get(client_id)
-            .map(|heights| {
-                heights.keys().iter().for_each(|height| {
-                    height.map(|height| {
-                        env::storage_remove(
-                            &ClientConsensusStatePath::new(client_id, height)
-                                .to_string()
-                                .into_bytes(),
-                        )
-                    });
-                })
-            });
+        if let Some(heights) = self.client_consensus_state_height_sets.get(client_id) {
+            heights.keys().iter().for_each(|height| {
+                height.map(|height| {
+                    env::storage_remove(
+                        &ClientConsensusStatePath::new(client_id, height)
+                            .to_string()
+                            .into_bytes(),
+                    )
+                });
+            })
+        }
         self.client_consensus_state_height_sets.remove(client_id);
         self.client_consensus_state_height_sets.flush();
         env::storage_remove(&ClientStatePath::new(client_id).to_string().into_bytes());
@@ -155,46 +158,43 @@ impl NearIbcStore {
     }
     ///
     pub fn remove_connection(&mut self, connection_id: &ConnectionId) {
-        env::storage_remove(&ConnectionPath::new(&connection_id).to_string().into_bytes());
+        env::storage_remove(&ConnectionPath::new(connection_id).to_string().into_bytes());
         self.connection_id_set.remove(connection_id);
         self.connection_id_set.flush();
         log!("Connection '{}' has been removed.", connection_id);
     }
     ///
     pub fn remove_channel(&mut self, port_channel_id: &(PortId, ChannelId)) {
-        self.packet_commitment_sequence_sets
-            .get(port_channel_id)
-            .map(|set| {
-                set.iter().for_each(|sequence| {
-                    env::storage_remove(
-                        &CommitmentPath::new(&port_channel_id.0, &port_channel_id.1, *sequence)
-                            .to_string()
-                            .into_bytes(),
-                    );
-                })
+        if let Some(set) = self.packet_commitment_sequence_sets.get(port_channel_id) {
+            set.iter().for_each(|sequence| {
+                env::storage_remove(
+                    &CommitmentPath::new(&port_channel_id.0, &port_channel_id.1, *sequence)
+                        .to_string()
+                        .into_bytes(),
+                );
+            })
+        }
+        if let Some(set) = self.packet_receipt_sequence_sets.get(port_channel_id) {
+            set.iter().for_each(|sequence| {
+                env::storage_remove(
+                    &ReceiptPath::new(&port_channel_id.0, &port_channel_id.1, *sequence)
+                        .to_string()
+                        .into_bytes(),
+                );
             });
-        self.packet_receipt_sequence_sets
+        }
+        if let Some(set) = self
+            .packet_acknowledgement_sequence_sets
             .get(port_channel_id)
-            .map(|set| {
-                set.iter().for_each(|sequence| {
-                    env::storage_remove(
-                        &ReceiptPath::new(&port_channel_id.0, &port_channel_id.1, *sequence)
-                            .to_string()
-                            .into_bytes(),
-                    );
-                });
+        {
+            set.iter().for_each(|sequence| {
+                env::storage_remove(
+                    &AckPath::new(&port_channel_id.0, &port_channel_id.1, *sequence)
+                        .to_string()
+                        .into_bytes(),
+                );
             });
-        self.packet_acknowledgement_sequence_sets
-            .get(port_channel_id)
-            .map(|set| {
-                set.iter().for_each(|sequence| {
-                    env::storage_remove(
-                        &AckPath::new(&port_channel_id.0, &port_channel_id.1, *sequence)
-                            .to_string()
-                            .into_bytes(),
-                    );
-                });
-            });
+        }
         env::storage_remove(
             &SeqSendPath(port_channel_id.0.clone(), port_channel_id.1.clone())
                 .to_string()

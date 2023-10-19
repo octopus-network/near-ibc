@@ -199,7 +199,7 @@ where
             values.push(
                 self.index_map
                     .get(&index)
-                    .map(|k| self.value_map.get(k).map(|v| v).unwrap()),
+                    .map(|k| self.value_map.get(k).unwrap()),
             );
         }
         values
@@ -208,7 +208,7 @@ where
     pub fn get_value_by_index(&self, index: &u64) -> Option<&V> {
         self.index_map
             .get(index)
-            .map(|k| self.value_map.get(k).map(|v| v).unwrap())
+            .map(|k| self.value_map.get(k).unwrap())
     }
     /// Get value by key.
     pub fn get_value_by_key(&self, key: &K) -> Option<&V> {
@@ -217,7 +217,7 @@ where
     /// Get the value of the maximum key less than the given key.
     pub fn get_previous_value_by_key(&self, key: &K) -> Option<&V> {
         if let Some(key) = self.get_previous_key_by_key(key) {
-            self.get_value_by_key(&key)
+            self.get_value_by_key(key)
         } else {
             None
         }
@@ -225,7 +225,7 @@ where
     /// Get the value of the minimum key greater than the given key.
     pub fn get_next_value_by_key(&self, key: &K) -> Option<&V> {
         if let Some(key) = self.get_next_key_by_key(key) {
-            self.get_value_by_key(&key)
+            self.get_value_by_key(key)
         } else {
             None
         }

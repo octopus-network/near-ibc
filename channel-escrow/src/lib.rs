@@ -70,7 +70,7 @@ impl Contract {
     #[init]
     pub fn new(near_ibc_account: AccountId) -> Self {
         let account_id = String::from(env::current_account_id().as_str());
-        let parts = account_id.split(".").collect::<Vec<&str>>();
+        let parts = account_id.split('.').collect::<Vec<&str>>();
         assert!(
             parts.len() > 2,
             "ERR_CONTRACT_MUST_BE_DEPLOYED_IN_SUB_ACCOUNT",
@@ -102,7 +102,7 @@ impl Contract {
         );
         let msg = parse_result.unwrap();
         let current_account_id = env::current_account_id();
-        let (channel_id, _) = current_account_id.as_str().split_once(".").unwrap();
+        let (channel_id, _) = current_account_id.as_str().split_once('.').unwrap();
         let token_denom = token_denom.unwrap();
         let transfer_request = Ics20TransferRequest {
             port_on_a: PORT_ID_STR.to_string(),
@@ -132,17 +132,17 @@ impl Contract {
         amount: U128,
     ) {
         assert!(
-            self.pending_transfer_requests.contains_key(&account_id),
+            self.pending_transfer_requests.contains_key(account_id),
             "ERR_NO_PENDING_TRANSFER_REQUEST"
         );
-        let req = self.pending_transfer_requests.get(&account_id).unwrap();
+        let req = self.pending_transfer_requests.get(account_id).unwrap();
         assert!(
             req.amount == amount
                 && req.token_denom.eq(base_denom)
                 && req.token_trace_path.eq(trace_path),
             "ERR_PENDING_TRANSFER_REQUEST_NOT_MATCHED"
         );
-        self.pending_transfer_requests.remove(&account_id);
+        self.pending_transfer_requests.remove(account_id);
     }
     // Get token contract account id corresponding to the asset denom.
     fn get_token_contract_by_asset_denom(&self, asset_denom: &AssetDenom) -> Option<AccountId> {
@@ -194,7 +194,7 @@ impl ChannelEscrow for Contract {
             .with_attached_deposit(1)
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 2)
             .with_unused_gas_weight(0)
-            .ft_transfer(receiver_id, amount.into(), None);
+            .ft_transfer(receiver_id, amount, None);
     }
 }
 
@@ -253,7 +253,7 @@ impl ProcessTransferRequestCallback for Contract {
             .with_attached_deposit(1)
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 2)
             .with_unused_gas_weight(0)
-            .ft_transfer(sender_id, amount.into(), None);
+            .ft_transfer(sender_id, amount, None);
     }
 }
 
@@ -290,19 +290,14 @@ impl Viewer for Contract {
     }
     ///
     fn get_pending_accounts(&self) -> Vec<AccountId> {
-        self.pending_transfer_requests
-            .keys()
-            .map(|account_id| account_id.clone())
-            .collect()
+        self.pending_transfer_requests.keys().cloned().collect()
     }
     ///
     fn get_pending_transfer_request_of(
         &self,
         account_id: AccountId,
     ) -> Option<Ics20TransferRequest> {
-        self.pending_transfer_requests
-            .get(&account_id)
-            .map(|req| req.clone())
+        self.pending_transfer_requests.get(&account_id).cloned()
     }
 }
 

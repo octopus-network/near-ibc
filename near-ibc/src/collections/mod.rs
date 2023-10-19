@@ -1,5 +1,5 @@
 use crate::prelude::*;
-
+use core::cmp::Ordering;
 pub use indexed_ascending_lookup_queue::IndexedAscendingLookupQueue;
 pub use indexed_ascending_simple_queue::IndexedAscendingSimpleQueue;
 
@@ -33,7 +33,7 @@ where
     /// Get current length of the queue.
     fn len(&self) -> u64 {
         if self.end_index() < self.start_index() {
-            return 0;
+            0
         } else if self.end_index() == self.start_index() {
             if self.get_key_by_index(&self.start_index()).is_some() {
                 return 1;
@@ -67,12 +67,10 @@ where
         while start <= end {
             let mid = start + (end - start) / 2;
             if let Some(mid_key) = self.get_key_by_index(&mid) {
-                if mid_key == key {
-                    return Some(mid);
-                } else if mid_key < key {
-                    start = mid + 1;
-                } else {
-                    end = mid - 1;
+                match mid_key.cmp(key) {
+                    Ordering::Equal => return Some(mid),
+                    Ordering::Less => start = mid + 1,
+                    Ordering::Greater => end = mid - 1,
                 }
             } else {
                 return None;
