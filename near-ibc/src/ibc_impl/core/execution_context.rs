@@ -92,14 +92,15 @@ impl ClientExecutionContext for NearIbcStore {
                 ),
             );
         }
-        self.client_consensus_state_height_sets
+        if let Some(heights) = self
+            .client_consensus_state_height_sets
             .get_mut(&consensus_state_path.client_id)
-            .map(|heights| {
-                heights.push_back(
-                    Height::new(consensus_state_path.epoch, consensus_state_path.height).unwrap(),
-                );
-                heights.flush();
-            });
+        {
+            heights.push_back(
+                Height::new(consensus_state_path.epoch, consensus_state_path.height).unwrap(),
+            );
+            heights.flush();
+        }
         Ok(())
     }
 }
@@ -136,12 +137,10 @@ impl ExecutionContext for NearIbcStore {
                 ),
             );
         }
-        self.client_processed_times
-            .get_mut(&client_id)
-            .map(|processed_times| {
-                processed_times.push_back((height, timestamp.nanoseconds()));
-                processed_times.flush();
-            });
+        if let Some(processed_times) = self.client_processed_times.get_mut(&client_id) {
+            processed_times.push_back((height, timestamp.nanoseconds()));
+            processed_times.flush();
+        }
         Ok(())
     }
 
@@ -171,12 +170,10 @@ impl ExecutionContext for NearIbcStore {
                 ),
             );
         }
-        self.client_processed_heights
-            .get_mut(&client_id)
-            .map(|processed_heights| {
-                processed_heights.push_back((height, host_height));
-                processed_heights.flush();
-            });
+        if let Some(processed_heights) = self.client_processed_heights.get_mut(&client_id) {
+            processed_heights.push_back((height, host_height));
+            processed_heights.flush();
+        }
         Ok(())
     }
 
@@ -278,16 +275,15 @@ impl ExecutionContext for NearIbcStore {
         log!("delete_packet_commitment: path: {}", commitment_path);
         let key = commitment_path.to_string().into_bytes();
         env::storage_remove(&key);
-        //
-        self.packet_commitment_sequence_sets
-            .get_mut(&(
-                commitment_path.port_id.clone(),
-                commitment_path.channel_id.clone(),
-            ))
-            .map(|sequences| {
-                sequences.remove(&commitment_path.sequence);
-                sequences.flush();
-            });
+
+        if let Some(sequences) = self.packet_commitment_sequence_sets.get_mut(&(
+            commitment_path.port_id.clone(),
+            commitment_path.channel_id.clone(),
+        )) {
+            sequences.remove(&commitment_path.sequence);
+            sequences.flush();
+        }
+
         Ok(())
     }
 
@@ -350,12 +346,13 @@ impl ExecutionContext for NearIbcStore {
         let key = ack_path.to_string().into_bytes();
         env::storage_remove(&key);
         //
-        self.packet_acknowledgement_sequence_sets
+        if let Some(sequences) = self
+            .packet_acknowledgement_sequence_sets
             .get_mut(&(ack_path.port_id.clone(), ack_path.channel_id.clone()))
-            .map(|sequences| {
-                sequences.remove(&ack_path.sequence);
-                sequences.flush();
-            });
+        {
+            sequences.remove(&ack_path.sequence);
+            sequences.flush();
+        }
         Ok(())
     }
 
@@ -434,9 +431,9 @@ impl ExecutionContext for NearIbcStore {
     fn emit_ibc_event(&mut self, event: IbcEvent) {
         let height = self.host_height().unwrap();
         if self.ibc_events_history.contains_key(&height) {
-            self.ibc_events_history
-                .get_value_by_key_mut(&height)
-                .map(|events| events.push(event.clone()));
+            if let Some(events) = self.ibc_events_history.get_value_by_key_mut(&height) {
+                events.push(event.clone())
+            }
         } else {
             self.ibc_events_history
                 .push_back((height, vec![event.clone()]));
@@ -464,8 +461,8 @@ fn record_packet_sequence(
     if !lookup_sets.contains_key(&key) {
         lookup_sets.insert(key.clone(), UnorderedSet::new(storage_key));
     }
-    lookup_sets.get_mut(&key).map(|sequences| {
-        sequences.insert(sequence.clone());
+    if let Some(sequences) = lookup_sets.get_mut(&key) {
+        sequences.insert(*sequence);
         sequences.flush();
-    });
+    }
 }

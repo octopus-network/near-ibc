@@ -31,7 +31,7 @@ impl Contract {
     #[init]
     pub fn new() -> Self {
         let account_id = String::from(env::current_account_id().as_str());
-        let parts = account_id.split(".").collect::<Vec<&str>>();
+        let parts = account_id.split('.').collect::<Vec<&str>>();
         assert!(
             parts.len() > 2,
             "ERR_CONTRACT_MUST_BE_DEPLOYED_IN_SUB_ACCOUNT",

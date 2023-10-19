@@ -149,7 +149,7 @@ impl Contract {
             }
             errors
         });
-        if errors.len() > 0 {
+        if !errors.is_empty() {
             log!("Error(s) occurred: {:?}", errors);
         }
         near_ibc_store.flush();
@@ -364,7 +364,7 @@ impl TryInto<PrefixedCoin> for TransferringCoins {
                 base_denom: BaseDenom::from_str(self.base_denom.as_str())
                     .map_err(|_| "ERR_INVALID_BASE_DENOM".to_string())?,
             },
-            amount: Amount::from_str(&self.amount.as_str())
+            amount: Amount::from_str(self.amount.as_str())
                 .map_err(|_| "ERR_INVALID_AMOUNT".to_string())?,
         })
     }

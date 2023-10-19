@@ -101,7 +101,7 @@ pub fn refund_deposit(previously_used_bytes: u64) {
 /// Asserts that the predecessor account is the root account.
 pub fn assert_root_account() {
     let account_id = String::from(env::current_account_id().as_str());
-    let parts = account_id.split(".").collect::<Vec<&str>>();
+    let parts = account_id.split('.').collect::<Vec<&str>>();
     let root_account = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
     assert_eq!(
         env::predecessor_account_id().to_string(),
@@ -113,7 +113,7 @@ pub fn assert_root_account() {
 // Asserts that the predecessor is the parent account.
 pub fn assert_parent_account() {
     let account_id = String::from(env::current_account_id().as_str());
-    let (_first, parent) = account_id.split_once(".").unwrap();
+    let (_first, parent) = account_id.split_once('.').unwrap();
     assert_eq!(
         env::predecessor_account_id().as_str(),
         parent,
@@ -124,7 +124,7 @@ pub fn assert_parent_account() {
 /// Asserts that the predecessor account is the root account.
 pub fn assert_grandparent_account() {
     let account_id = String::from(env::current_account_id().as_str());
-    let parts = account_id.split(".").collect::<Vec<&str>>();
+    let parts = account_id.split('.').collect::<Vec<&str>>();
     assert!(
         parts.len() > 3,
         "ERR_ONLY_GRANDPARENT_ACCOUNT_CAN_CALL_THIS_METHOD"
@@ -160,7 +160,7 @@ pub fn assert_ancestor_account() {
 /// Get the grandparent account id from the current account id.
 pub fn get_grandparent_account_id() -> AccountId {
     let account_id = String::from(env::current_account_id().as_str());
-    let parts = account_id.split(".").collect::<Vec<&str>>();
+    let parts = account_id.split('.').collect::<Vec<&str>>();
     assert!(parts.len() > 3, "ERR_NO_GRANDPARENT_ACCOUNT_FOUND");
     let grandparent_account = parts[2..parts.len()].join(".");
     AccountId::from_str(grandparent_account.as_str()).unwrap()

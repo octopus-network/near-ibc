@@ -45,7 +45,7 @@ impl Contract {
     #[init]
     pub fn new() -> Self {
         let account_id = String::from(env::current_account_id().as_str());
-        let parts = account_id.split(".").collect::<Vec<&str>>();
+        let parts = account_id.split('.').collect::<Vec<&str>>();
         assert!(
             parts.len() > 2,
             "ERR_CONTRACT_MUST_BE_DEPLOYED_IN_SUB_ACCOUNT",
@@ -107,7 +107,7 @@ pub trait Viewer {
 #[near_bindgen]
 impl Viewer for Contract {
     fn get_channel_id_set(&self) -> Vec<ChannelId> {
-        self.channel_id_set.iter().map(|id| id.clone()).collect()
+        self.channel_id_set.iter().cloned().collect()
     }
 }
 

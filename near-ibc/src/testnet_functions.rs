@@ -34,11 +34,7 @@ impl Contract {
         self.assert_governance();
         let max_gas = env::prepaid_gas() * 4 / 5;
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
-        let client_ids: Vec<ClientId> = near_ibc_store
-            .client_id_set
-            .iter()
-            .map(|id| id.clone())
-            .collect();
+        let client_ids: Vec<ClientId> = near_ibc_store.client_id_set.iter().cloned().collect();
         let mut count = 0;
         for client_id in client_ids {
             near_ibc_store.remove_client(&client_id);
@@ -58,11 +54,8 @@ impl Contract {
         self.assert_governance();
         let max_gas = env::prepaid_gas() * 4 / 5;
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
-        let connection_ids: Vec<ConnectionId> = near_ibc_store
-            .connection_id_set
-            .iter()
-            .map(|id| id.clone())
-            .collect();
+        let connection_ids: Vec<ConnectionId> =
+            near_ibc_store.connection_id_set.iter().cloned().collect();
         let mut count = 0;
         for connection_id in connection_ids {
             near_ibc_store.remove_connection(&connection_id);
@@ -82,11 +75,8 @@ impl Contract {
         self.assert_governance();
         let max_gas = env::prepaid_gas() * 4 / 5;
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
-        let port_channel_ids: Vec<(PortId, ChannelId)> = near_ibc_store
-            .port_channel_id_set
-            .iter()
-            .map(|id| id.clone())
-            .collect();
+        let port_channel_ids: Vec<(PortId, ChannelId)> =
+            near_ibc_store.port_channel_id_set.iter().cloned().collect();
         let mut count = 0;
         for port_channel_id in port_channel_ids {
             near_ibc_store.remove_channel(&port_channel_id);
