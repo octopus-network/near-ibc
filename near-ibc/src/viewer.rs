@@ -110,7 +110,7 @@ pub trait Viewer {
 }
 
 #[near_bindgen]
-impl Viewer for Contract {
+impl Viewer for NearIbcContract {
     fn version(&self) -> String {
         VERSION.to_string()
     }

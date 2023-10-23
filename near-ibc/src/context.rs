@@ -2,7 +2,6 @@ use crate::{
     collections::{
         IndexedAscendingLookupQueue, IndexedAscendingQueueViewer, IndexedAscendingSimpleQueue,
     },
-    module_holder::ModuleHolder,
     prelude::*,
     types::ProcessingResult,
     StorageKey,
@@ -25,7 +24,7 @@ use ibc::{
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env, log,
-    store::{LookupMap, UnorderedSet}, AccountId,
+    store::{LookupMap, UnorderedSet},
 };
 
 pub type NearTimeStamp = u64;
@@ -33,8 +32,6 @@ pub type HostHeight = Height;
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct NearIbcStore {
-    /// To support the mutable borrow in `Router::get_route_mut`.
-    pub module_holder: ModuleHolder,
     /// The client ids of the clients.
     pub client_id_set: UnorderedSet<ClientId>,
     pub client_counter: u64,
@@ -86,9 +83,8 @@ impl Debug for NearIbcStore {
 
 impl NearIbcStore {
     ///
-    pub fn new(appchain_registry_account: AccountId) -> Self {
+    pub fn new() -> Self {
         Self {
-            module_holder: ModuleHolder::new(appchain_registry_account),
             client_id_set: UnorderedSet::new(StorageKey::ClientIdSet),
             client_counter: 0,
             client_processed_times: LookupMap::new(StorageKey::ClientProcessedTimes),

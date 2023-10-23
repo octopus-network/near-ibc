@@ -9,8 +9,6 @@ use near_sdk::store::UnorderedSet;
 
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct OldNearIbcStore {
-    /// To support the mutable borrow in `Router::get_route_mut`.
-    pub module_holder: ModuleHolder,
     /// The client ids of the clients.
     pub client_id_set: UnorderedSet<ClientId>,
     pub client_counter: u64,
@@ -42,11 +40,13 @@ pub struct OldNearIbcStore {
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct OldContract {
     near_ibc_store: LazyOption<OldNearIbcStore>,
+    /// To support the mutable borrow in `Router::get_route_mut`.
+    module_holder: ModuleHolder,
     governance_account: AccountId,
 }
 
 #[near_bindgen]
-impl Contract {
+impl NearIbcContract {
     #[init(ignore_state)]
     pub fn migrate_state() -> Self {
         // Deserialize the state using the old contract structure.
@@ -55,13 +55,14 @@ impl Contract {
         near_sdk::assert_self();
         //
         // Create the new contract using the data from the old contract.
-        let new_contract = Contract {
+        let new_contract = NearIbcContract {
             near_ibc_store: LazyOption::new(
                 StorageKey::NearIbcStore,
                 Some(&NearIbcStore::from_old_version(
                     old_contract.near_ibc_store.get().unwrap(),
                 )),
             ),
+            module_holder: old_contract.module_holder,
             governance_account: old_contract.governance_account,
         };
         //
@@ -78,7 +79,6 @@ pub fn get_storage_key_of_lookup_map<T: BorshSerialize>(prefix: &StorageKey, ind
 impl NearIbcStore {
     pub fn from_old_version(old_version: OldNearIbcStore) -> Self {
         Self {
-            module_holder: old_version.module_holder,
             client_id_set: old_version.client_id_set,
             client_counter: old_version.client_counter,
             client_processed_times: old_version.client_processed_times,

@@ -1,4 +1,5 @@
 use crate::{types::ProcessingResult, *};
+use ibc::core::ics24_host::path::{ClientConsensusStatePath, ClientStatePath};
 use near_sdk::near_bindgen;
 
 ///
@@ -10,7 +11,7 @@ fn assert_testnet() {
 }
 
 #[near_bindgen]
-impl Contract {
+impl NearIbcContract {
     ///
     pub fn clear_ibc_events_history(&mut self) -> ProcessingResult {
         assert_testnet();
@@ -107,5 +108,24 @@ impl Contract {
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store.remove_client(&client_id);
         self.near_ibc_store.set(&near_ibc_store);
+    }
+    ///
+    pub fn remove_raw_client(&mut self, client_id: ClientId) {
+        assert_testnet();
+        self.assert_governance();
+        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store.client_processed_heights.remove(&client_id);
+        near_ibc_store.client_processed_times.remove(&client_id);
+        env::storage_remove(
+            &ClientConsensusStatePath::new(&client_id, &Height::new(0, 1).unwrap())
+                .to_string()
+                .into_bytes(),
+        );
+        near_ibc_store
+            .client_consensus_state_height_sets
+            .remove(&client_id);
+        near_ibc_store.client_id_set.remove(&client_id);
+        self.near_ibc_store.set(&near_ibc_store);
+        env::storage_remove(&ClientStatePath::new(&client_id).to_string().into_bytes());
     }
 }

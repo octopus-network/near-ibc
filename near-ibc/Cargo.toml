@@ -19,4 +19,4 @@ token-factory = { path = "../token-factory" }
 utils = { path = "../utils" }
 tendermint = { version = "0.33" }
 hex = "0.4"
-octopus-lpos = { path = "/Users/yangzhen/workspace/octopus-network/octopus-lpos-ibc/octopus-lpos" }
+octopus-lpos = { git = "https://github.com/octopus-network/octopus-lpos-ibc.git", branch = "main" }

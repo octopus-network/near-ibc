@@ -28,6 +28,7 @@ use ibc::{
     Height, Signer,
 };
 use ibc_proto::google::protobuf::Any;
+use module_holder::ModuleHolder;
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
@@ -54,6 +55,7 @@ use utils::{
 mod collections;
 mod context;
 mod events;
+mod ext_interfaces;
 mod ibc_impl;
 pub mod migration;
 mod module_holder;
@@ -62,7 +64,7 @@ mod testnet_functions;
 pub mod types;
 pub mod viewer;
 
-pub const VERSION: &str = "v1.0.0-pre.4";
+pub const VERSION: &str = "v1.1.0-pre.0";
 /// The default timeout seconds for the `MsgTransfer` message.
 pub const DEFAULT_TIMEOUT_SECONDS: u64 = 1000;
 
@@ -109,28 +111,27 @@ pub enum StorageKey {
     IbcEventsHistoryIndexMap,
     IbcEventsHistoryValueMap,
     ChainIdChannelMap,
-    OctopusLposModule,
 }
 
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
-pub struct Contract {
+pub struct NearIbcContract {
     near_ibc_store: LazyOption<NearIbcStore>,
+    /// To support the mutable borrow in `Router::get_route_mut`.
+    module_holder: ModuleHolder,
     governance_account: AccountId,
 }
 
 #[near_bindgen]
-impl Contract {
+impl NearIbcContract {
     #[private]
     #[init]
     pub fn init(appchain_registry_account: AccountId) -> Self {
         env::storage_write("version".as_bytes(), VERSION.as_bytes());
         Self {
-            near_ibc_store: LazyOption::new(
-                StorageKey::NearIbcStore,
-                Some(&NearIbcStore::new(appchain_registry_account)),
-            ),
+            near_ibc_store: LazyOption::new(StorageKey::NearIbcStore, Some(&NearIbcStore::new())),
             governance_account: env::current_account_id(),
+            module_holder: ModuleHolder::new(appchain_registry_account),
         }
     }
     ///
@@ -146,19 +147,16 @@ impl Contract {
         ExtraDepositCost::reset();
         // Deliver messages to `ibc-rs`
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
-        let mut router = self.near_ibc_store.get().unwrap();
 
         messages.into_iter().fold(vec![], |mut errors, msg| {
             match MsgEnvelope::try_from(msg.clone()) {
-                Ok(msg) => {
-                    match ibc::core::dispatch(&mut near_ibc_store, &mut router, msg.clone()) {
-                        Ok(()) => (),
-                        Err(e) => {
-                            log!("Error occurred in processing message: {:?}, {:?}", msg, e);
-                            errors.push(e)
-                        }
+                Ok(msg) => match ibc::core::dispatch(&mut near_ibc_store, self, msg.clone()) {
+                    Ok(()) => (),
+                    Err(e) => {
+                        log!("Error occurred in processing message: {:?}, {:?}", msg, e);
+                        errors.push(e)
                     }
-                }
+                },
                 Err(e) => {
                     log!("Error occurred in routing message: {:?}, {:?}", msg, e);
                     errors.push(e)
@@ -304,120 +302,6 @@ impl Contract {
         ExtraDepositCost::add(minimum_deposit);
         utils::refund_deposit(used_bytes);
     }
-    ///
-    pub fn send_vsc_packet(&mut self, vsc_packet_data: VscPacketData) {
-        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
-        let predecessor_account_id = env::predecessor_account_id().to_string();
-        let (appchain_id, parent_account) = predecessor_account_id.split_once(".").unwrap();
-        let mut octopus_lpos_module = near_ibc_store
-            .module_holder
-            .octopus_lpos_module
-            .get()
-            .unwrap();
-        assert!(
-            parent_account
-                == octopus_lpos_module
-                    .appchain_registry_account
-                    .to_string()
-                    .as_str(),
-            "ERR_INVALID_CALLER, only octopus appchain anchor accounts can call this function."
-        );
-        if let Err(e) = octopus_lpos::send_vsc_packet(
-            &mut near_ibc_store,
-            &mut octopus_lpos_module,
-            MsgValidatorSetChange {
-                chain_id: appchain_id.to_string(),
-                packet_data: octopus_lpos::packet::vsc::VscPacketData {
-                    validator_pubkeys: vsc_packet_data
-                        .validator_pubkeys
-                        .into_iter()
-                        .map(
-                            |validator_key_and_power| octopus_lpos::packet::vsc::ValidatorUpdate {
-                                public_key: tendermint::PublicKey::Ed25519(
-                                    tendermint::crypto::ed25519::VerificationKey::try_from(
-                                        validator_key_and_power.public_key.get(1..).unwrap(),
-                                    )
-                                    .expect("ERR_INVALID_PUBLIC_KEY"),
-                                ),
-                                power: validator_key_and_power.power.0,
-                            },
-                        )
-                        .collect(),
-                    validator_set_id: vsc_packet_data.validator_set_id.0,
-                    slash_acks: vsc_packet_data
-                        .slash_acks
-                        .into_iter()
-                        .map(|bytes| hex::encode(&bytes))
-                        .collect(),
-                },
-                timeout_height_on_b: TimeoutHeight::Never,
-                timeout_timestamp_on_b: Timestamp::none(),
-            },
-        ) {
-            log!("ERR_SEND_VSC_PACKET: {:?}", e);
-        }
-    }
-}
-
-#[near_bindgen]
-impl TransferRequestHandler for Contract {
-    fn process_transfer_request(&mut self, transfer_request: Ics20TransferRequest) {
-        utils::assert_sub_account();
-        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
-        let timeout_seconds = transfer_request
-            .timeout_seconds
-            .map_or_else(|| DEFAULT_TIMEOUT_SECONDS, |value| value.0);
-        if let Err(e) = ibc::applications::transfer::send_transfer(
-            &mut near_ibc_store,
-            &mut TransferModule(),
-            MsgTransfer {
-                port_id_on_a: PortId::from_str(transfer_request.port_on_a.as_str()).unwrap(),
-                chan_id_on_a: ChannelId::from_str(transfer_request.chan_on_a.as_str()).unwrap(),
-                packet_data: PacketData {
-                    token: PrefixedCoin {
-                        denom: PrefixedDenom {
-                            trace_path: TracePath::from_str(
-                                transfer_request.token_trace_path.as_str(),
-                            )
-                            .unwrap(),
-                            base_denom: BaseDenom::from_str(transfer_request.token_denom.as_str())
-                                .unwrap(),
-                        },
-                        amount: Amount::from_str(transfer_request.amount.0.to_string().as_str())
-                            .unwrap(),
-                    },
-                    sender: Signer::from(transfer_request.sender.clone()),
-                    receiver: Signer::from(transfer_request.receiver.clone()),
-                    memo: Memo::from_str("").unwrap(),
-                },
-                timeout_height_on_b: TimeoutHeight::Never {},
-                timeout_timestamp_on_b: Timestamp::from_nanoseconds(
-                    env::block_timestamp() + timeout_seconds * 1000000000,
-                )
-                .unwrap(),
-            },
-        ) {
-            log!("ERR_SEND_TRANSFER: {:?}", e);
-            log!(
-                "Cancelling transfer request for account {}, trace path {}, base denom {} with amount {}",
-                transfer_request.sender,
-                transfer_request.token_trace_path,
-                transfer_request.token_denom,
-                transfer_request.amount.0
-            );
-            ext_process_transfer_request_callback::ext(env::predecessor_account_id())
-                .with_attached_deposit(0)
-                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
-                .with_unused_gas_weight(0)
-                .cancel_transfer_request(
-                    transfer_request.token_trace_path,
-                    transfer_request.token_denom,
-                    AccountId::from_str(transfer_request.sender.as_str()).unwrap(),
-                    transfer_request.amount,
-                );
-        }
-        self.near_ibc_store.set(&near_ibc_store);
-    }
 }
 
 pub struct TransferringCoins {
@@ -445,7 +329,7 @@ impl TryInto<PrefixedCoin> for TransferringCoins {
 
 /// Some sudo functions for testing.
 #[near_bindgen]
-impl Contract {
+impl NearIbcContract {
     pub fn cancel_transfer_request_in_channel_escrow(
         &mut self,
         channel_id: String,
