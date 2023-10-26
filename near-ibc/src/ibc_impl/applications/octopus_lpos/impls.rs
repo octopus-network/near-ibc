@@ -1,13 +1,12 @@
 use super::OctopusLposModule;
-use crate::{context::NearIbcStoreHost, prelude::*};
+use crate::{context::NearIbcStoreHost, ibc_impl::core::client_state::AnyClientState, prelude::*};
 use core::str::FromStr;
 use ibc::core::{
     ics04_channel::channel::ChannelEnd,
     ics24_host::{
-        identifier::{ChannelId, PortId},
+        identifier::{ChannelId, ConnectionId, PortId},
         path::ChannelEndPath,
     },
-    ValidationContext,
 };
 use near_sdk::{ext_contract, json_types::U64, AccountId};
 use octopus_lpos::{
@@ -31,10 +30,11 @@ pub trait OctopusAppchainAnchorIbc {
 impl NearIbcStoreHost for OctopusLposModule {}
 
 impl OctopusLposValidationContext for OctopusLposModule {
+    //
     fn get_port(&self) -> Result<PortId, OctopusLposError> {
         Ok(PortId::from_str(PORT_ID_STR).unwrap())
     }
-
+    //
     fn get_channel_end(
         &self,
         consumer_chain_id: &ConsumerChainId,
@@ -47,25 +47,53 @@ impl OctopusLposValidationContext for OctopusLposModule {
             .ok_or_else(|| OctopusLposError::InvalidConsumerChainId {
                 chain_id: consumer_chain_id.clone(),
             })?;
-        let channel_end = near_ibc_store.channel_end(&ChannelEndPath::new(&port_id, channel_id))?;
+        let channel_end = ibc::core::ValidationContext::channel_end(
+            &near_ibc_store,
+            &ChannelEndPath::new(&port_id, channel_id),
+        )?;
         Ok((port_id, channel_id.clone(), channel_end))
     }
-
-    fn get_consumer_chain_id(
+    fn get_consumer_chain_id_by_connection(
+        &self,
+        connection_id: &ConnectionId,
+    ) -> Result<ConsumerChainId, OctopusLposError> {
+        let near_ibc_store = OctopusLposModule::get_near_ibc_store();
+        let connection_end =
+            ibc::core::ValidationContext::connection_end(&near_ibc_store, connection_id)?;
+        let client_state = ibc::core::ValidationContext::client_state(
+            &near_ibc_store,
+            &connection_end.client_id(),
+        )?;
+        match client_state {
+            AnyClientState::Tendermint(client_state) => Ok(client_state.chain_id.to_string()),
+        }
+    }
+    //
+    fn get_consumer_chain_id_by_channel(
         &self,
         channel_id: &ChannelId,
     ) -> Result<ConsumerChainId, OctopusLposError> {
-        self.chain_id_channel_map
-            .into_iter()
-            .find(|id| id.1.clone() == *channel_id)
-            .map(|id| id.0.clone())
-            .ok_or_else(|| OctopusLposError::InvalidChannelId {
-                channel_id: channel_id.clone(),
-            })
+        let near_ibc_store = OctopusLposModule::get_near_ibc_store();
+        let channel_end = ibc::core::ValidationContext::channel_end(
+            &near_ibc_store,
+            &ChannelEndPath(self.get_port()?, channel_id.clone()),
+        )?;
+        self.get_consumer_chain_id_by_connection(&channel_end.connection_hops[0])
     }
 }
 
 impl OctopusLposExecutionContext for OctopusLposModule {
+    //
+    fn bond_channel_to_consumer_chain(
+        &mut self,
+        channel_id: &ChannelId,
+        consumer_chain_id: &ConsumerChainId,
+    ) -> Result<(), OctopusLposError> {
+        self.chain_id_channel_map
+            .insert(consumer_chain_id.clone(), channel_id.clone());
+        Ok(())
+    }
+    //
     fn slash_validator(
         &mut self,
         consumer_chain_id: &ConsumerChainId,
@@ -89,7 +117,7 @@ impl OctopusLposExecutionContext for OctopusLposModule {
         .slash_validator(slach_packet_data);
         Ok(())
     }
-
+    //
     fn on_vsc_matured(
         &mut self,
         consumer_chain_id: &ConsumerChainId,
@@ -113,7 +141,7 @@ impl OctopusLposExecutionContext for OctopusLposModule {
         .on_vsc_matured(U64::from(validator_set_id));
         Ok(())
     }
-
+    //
     fn distribute_reward(
         &mut self,
         consumer_chain_id: &ConsumerChainId,
@@ -121,7 +149,7 @@ impl OctopusLposExecutionContext for OctopusLposModule {
     ) -> Result<(), OctopusLposError> {
         let anchor_account_id = format!(
             "{}.{}",
-            consumer_chain_id.as_str(),
+            remove_suffix(consumer_chain_id.as_str()),
             self.appchain_registry_account.to_string()
         );
         ext_octopus_appchain_anchor_ibc::ext(
@@ -137,4 +165,13 @@ impl OctopusLposExecutionContext for OctopusLposModule {
         .distribute_reward(U64::from(validator_set_id));
         Ok(())
     }
+}
+
+fn remove_suffix(s: &str) -> String {
+    if let Some(index) = s.rfind("-") {
+        if s[index..].chars().skip(1).all(|c| c.is_numeric()) {
+            return s[..index].to_string();
+        }
+    }
+    s.to_string()
 }

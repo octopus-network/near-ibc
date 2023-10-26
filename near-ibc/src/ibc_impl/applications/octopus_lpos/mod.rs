@@ -1,7 +1,6 @@
 use crate::{prelude::*, StorageKey};
 use core::fmt::Debug;
 use ibc::{
-    applications::transfer::packet::PacketData,
     core::{
         ics04_channel::{
             acknowledgement::Acknowledgement,
@@ -15,14 +14,13 @@ use ibc::{
     },
     Signer,
 };
-use ibc_proto::ibc::apps::transfer::v2::FungibleTokenPacketData;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     log, serde_json,
     store::UnorderedMap,
     AccountId,
 };
-use octopus_lpos::ConsumerChainId;
+use octopus_lpos::{packet::consumer::ConsumerPacket, ConsumerChainId};
 
 pub mod impls;
 
@@ -112,9 +110,6 @@ impl Module for OctopusLposModule {
         port_id: &PortId,
         channel_id: &ChannelId,
     ) -> Result<(), ChannelError> {
-        // Create and initialize the escrow sub-account for this channel.
-
-        // Call default implementation.
         octopus_lpos::context::on_chan_open_confirm_validate(self, port_id, channel_id).map_err(
             |e| ChannelError::AppModule {
                 description: e.to_string(),
@@ -155,17 +150,16 @@ impl Module for OctopusLposModule {
             "Received packet: {:?}",
             String::from_utf8(packet.data.to_vec()).expect("Invalid packet data")
         );
-        let ft_packet_data = serde_json::from_slice::<FungibleTokenPacketData>(&packet.data)
-            .expect("Invalid packet data");
-        let maybe_ft_packet = Packet {
-            data: serde_json::to_string(
-                &PacketData::try_from(ft_packet_data).expect("Invalid packet data"),
-            )
-            .expect("Invalid packet data")
-            .into_bytes(),
+        let consumer_packet =
+            serde_json::from_slice::<ConsumerPacket>(&packet.data).expect("Invalid packet data");
+        let maybe_consumer_packet = Packet {
+            data: serde_json::to_string(&consumer_packet)
+                .expect("Invalid packet data")
+                .into_bytes(),
             ..packet.clone()
         };
-        let (extras, ack) = octopus_lpos::context::on_recv_packet_execute(self, &maybe_ft_packet);
+        let (extras, ack) =
+            octopus_lpos::context::on_recv_packet_execute(self, &maybe_consumer_packet);
         let ack_status =
             String::from_utf8(ack.as_bytes().to_vec()).expect("Invalid acknowledgement string");
         log!("Packet acknowledgement: {}", ack_status);
