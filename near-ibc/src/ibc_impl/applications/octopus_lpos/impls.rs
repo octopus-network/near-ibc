@@ -136,7 +136,7 @@ impl OctopusLposExecutionContext for OctopusLposModule {
             })?,
         )
         .with_attached_deposit(0)
-        .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 6)
+        .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
         .with_unused_gas_weight(0)
         .on_vsc_matured(U64::from(validator_set_id));
         Ok(())
@@ -160,7 +160,7 @@ impl OctopusLposExecutionContext for OctopusLposModule {
             })?,
         )
         .with_attached_deposit(0)
-        .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 20)
+        .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
         .distribute_reward(U64::from(validator_set_id));
         Ok(())
     }
