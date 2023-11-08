@@ -17,7 +17,7 @@ use ibc::{
 };
 use ibc_proto::ibc::apps::transfer::v2::FungibleTokenPacketData;
 use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
+    borsh::{BorshDeserialize, BorshSerialize},
     log, serde_json, AccountId,
 };
 
@@ -26,6 +26,7 @@ pub mod impls;
 pub struct AccountIdConversion(AccountId);
 
 #[derive(BorshDeserialize, BorshSerialize, Debug)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct TransferModule();
 
 impl NearIbcStoreHost for TransferModule {}

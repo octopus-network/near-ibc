@@ -25,7 +25,7 @@ use ibc::{
 };
 use itertools::Itertools;
 use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
+    borsh::{BorshDeserialize, BorshSerialize},
     env, near_bindgen,
 };
 
@@ -186,7 +186,7 @@ impl Viewer for NearIbcContract {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
             .get_packet_receipt(&ReceiptPath::new(&port_id, &channel_id, sequence))
-            .map_or(vec![], |receipt| receipt.try_to_vec().unwrap())
+            .map_or(vec![], |receipt| borsh::to_vec(&receipt).unwrap())
     }
 
     fn get_unreceipt_packet(
@@ -233,6 +233,7 @@ impl Viewer for NearIbcContract {
 
     fn get_client_connections(&self, client_id: ClientId) -> Vec<ConnectionId> {
         #[derive(BorshDeserialize, BorshSerialize, Debug)]
+        #[borsh(crate = "near_sdk::borsh")]
         struct ConnectionIds(pub Vec<ConnectionId>);
         let key = ClientConnectionPath::new(&client_id)
             .to_string()

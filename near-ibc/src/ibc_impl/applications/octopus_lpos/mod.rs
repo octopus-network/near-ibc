@@ -15,7 +15,7 @@ use ibc::{
     Signer,
 };
 use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
+    borsh::{BorshDeserialize, BorshSerialize},
     log, serde_json,
     store::UnorderedMap,
     AccountId,
@@ -25,6 +25,7 @@ use octopus_lpos::{packet::consumer::ConsumerPacket, ConsumerChainId};
 pub mod impls;
 
 #[derive(BorshDeserialize, BorshSerialize, Debug)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct OctopusLposModule {
     pub chain_id_channel_map: UnorderedMap<ConsumerChainId, ChannelId>,
     pub appchain_registry_account: AccountId,

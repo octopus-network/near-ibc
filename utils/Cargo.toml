@@ -7,6 +7,8 @@ edition = "2021"
 crate-type = ["rlib"]
 
 [dependencies]
-near-sdk = "4.1.0"
-near-contract-standards = "4.1.0"
+# near-sdk = "4.1.0"
+near-sdk = { git = "https://github.com/near/near-sdk-rs", branch = "master" }
+# near-contract-standards = "4.1.0"
+near-contract-standards = { git = "https://github.com/near/near-sdk-rs", branch = "master" }
 ibc = { version = "0.45.0", default-features = false, features = ["borsh", "serde"] }

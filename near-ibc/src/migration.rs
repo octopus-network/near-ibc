@@ -5,9 +5,14 @@ use crate::{
     *,
 };
 use ibc::core::{events::IbcEvent, ics04_channel::packet::Sequence};
-use near_sdk::store::UnorderedSet;
+use near_sdk::{borsh, store::UnorderedSet};
+
+pub trait StorageMigration {
+    fn migrate_state() -> Self;
+}
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct OldNearIbcStore {
     /// The client ids of the clients.
     pub client_id_set: UnorderedSet<ClientId>,
@@ -38,6 +43,7 @@ pub struct OldNearIbcStore {
 }
 
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct OldContract {
     near_ibc_store: LazyOption<OldNearIbcStore>,
     /// To support the mutable borrow in `Router::get_route_mut`.
@@ -46,9 +52,9 @@ pub struct OldContract {
 }
 
 #[near_bindgen]
-impl NearIbcContract {
+impl StorageMigration for NearIbcContract {
     #[init(ignore_state)]
-    pub fn migrate_state() -> Self {
+    fn migrate_state() -> Self {
         // Deserialize the state using the old contract structure.
         let old_contract: OldContract = env::state_read().expect("Old state doesn't exist");
         //
@@ -73,7 +79,11 @@ impl NearIbcContract {
 }
 
 pub fn get_storage_key_of_lookup_map<T: BorshSerialize>(prefix: &StorageKey, index: &T) -> Vec<u8> {
-    [prefix.try_to_vec().unwrap(), index.try_to_vec().unwrap()].concat()
+    [
+        borsh::to_vec(&prefix).unwrap(),
+        borsh::to_vec(&index).unwrap(),
+    ]
+    .concat()
 }
 
 impl NearIbcStore {

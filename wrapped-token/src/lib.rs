@@ -1,4 +1,3 @@
-#![no_std]
 #![deny(
     warnings,
     trivial_casts,
@@ -14,17 +13,19 @@ use core::str::FromStr;
 
 use alloc::{
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 use ibc::applications::transfer::TracePath;
-use near_contract_standards::fungible_token::{
-    events::{FtBurn, FtMint},
-    metadata::{FungibleTokenMetadata, FungibleTokenMetadataProvider},
-    FungibleToken,
+use near_contract_standards::{
+    fungible_token::{
+        events::{FtBurn, FtMint},
+        metadata::{FungibleTokenMetadata, FungibleTokenMetadataProvider},
+        FungibleToken, FungibleTokenCore, FungibleTokenResolver,
+    },
+    storage_management::{StorageBalance, StorageBalanceBounds, StorageManagement},
 };
 use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
+    borsh::{BorshDeserialize, BorshSerialize},
     collections::LazyOption,
     env,
     json_types::{U128, U64},
@@ -41,6 +42,7 @@ use utils::{
 };
 
 #[derive(BorshSerialize, BorshStorageKey)]
+#[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
     Token,
     Metadata,
@@ -53,6 +55,7 @@ pub enum StorageKey {
 /// from another chain on NEAR protocol.
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct Contract {
     /// The NEP-141 fungible token implementation.
     token: FungibleToken,
@@ -195,10 +198,88 @@ impl Contract {
         );
         self.pending_transfer_requests.remove(&account_id);
     }
+    ///
+    pub fn get_pending_accounts(&self) -> Vec<AccountId> {
+        self.pending_transfer_requests
+            .keys()
+            .map(|account_id| account_id.clone())
+            .collect()
+    }
+    ///
+    pub fn get_pending_transfer_request_of(
+        &self,
+        account_id: AccountId,
+    ) -> Option<Ics20TransferRequest> {
+        self.pending_transfer_requests
+            .get(&account_id)
+            .map(|req| req.clone())
+    }
 }
 
-near_contract_standards::impl_fungible_token_core!(Contract, token);
-near_contract_standards::impl_fungible_token_storage!(Contract, token);
+#[near_bindgen]
+impl FungibleTokenCore for Contract {
+    fn ft_total_supply(&self) -> U128 {
+        self.token.ft_total_supply()
+    }
+
+    fn ft_balance_of(&self, account_id: AccountId) -> U128 {
+        self.token.ft_balance_of(account_id)
+    }
+
+    fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>) {
+        self.token.ft_transfer(receiver_id, amount, memo)
+    }
+
+    fn ft_transfer_call(
+        &mut self,
+        receiver_id: AccountId,
+        amount: U128,
+        memo: Option<String>,
+        msg: String,
+    ) -> PromiseOrValue<U128> {
+        self.token.ft_transfer_call(receiver_id, amount, memo, msg)
+    }
+}
+
+#[near_bindgen]
+impl FungibleTokenResolver for Contract {
+    fn ft_resolve_transfer(
+        &mut self,
+        sender_id: AccountId,
+        receiver_id: AccountId,
+        amount: U128,
+    ) -> U128 {
+        self.token
+            .ft_resolve_transfer(sender_id, receiver_id, amount)
+    }
+}
+
+#[near_bindgen]
+impl StorageManagement for Contract {
+    fn storage_deposit(
+        &mut self,
+        account_id: Option<AccountId>,
+        registration_only: Option<bool>,
+    ) -> StorageBalance {
+        self.token.storage_deposit(account_id, registration_only)
+    }
+
+    fn storage_withdraw(&mut self, amount: Option<U128>) -> StorageBalance {
+        self.token.storage_withdraw(amount)
+    }
+
+    fn storage_unregister(&mut self, force: Option<bool>) -> bool {
+        self.token.storage_unregister(force)
+    }
+
+    fn storage_balance_bounds(&self) -> StorageBalanceBounds {
+        self.token.storage_balance_bounds()
+    }
+
+    fn storage_balance_of(&self, account_id: AccountId) -> Option<StorageBalance> {
+        self.token.storage_balance_of(account_id)
+    }
+}
 
 #[near_bindgen]
 impl WrappedToken for Contract {
@@ -292,27 +373,6 @@ impl FungibleTokenMetadataProvider for Contract {
 impl NearIbcAccountAssertion for Contract {
     fn near_ibc_account(&self) -> AccountId {
         self.near_ibc_account.clone()
-    }
-}
-
-/// View functions for the wrapped token.
-#[near_bindgen]
-impl Contract {
-    ///
-    pub fn get_pending_accounts(&self) -> Vec<AccountId> {
-        self.pending_transfer_requests
-            .keys()
-            .map(|account_id| account_id.clone())
-            .collect()
-    }
-    ///
-    pub fn get_pending_transfer_request_of(
-        &self,
-        account_id: AccountId,
-    ) -> Option<Ics20TransferRequest> {
-        self.pending_transfer_requests
-            .get(&account_id)
-            .map(|req| req.clone())
     }
 }
 

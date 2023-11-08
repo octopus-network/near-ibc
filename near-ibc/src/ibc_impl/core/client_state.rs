@@ -1,4 +1,5 @@
 use super::consensus_state::AnyConsensusState;
+use crate::context::NearEd25519Verifier;
 use crate::{collections::IndexedAscendingQueueViewer, context::NearIbcStore, prelude::*};
 use ibc::core::ics02_client::client_state::Status;
 use ibc::{
@@ -29,9 +30,9 @@ use serde::{Deserialize, Serialize};
 
 const TENDERMINT_CLIENT_STATE_TYPE_URL: &str = "/ibc.lightclients.tendermint.v1.ClientState";
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum AnyClientState {
-    Tendermint(TmClientState),
+    Tendermint(TmClientState<NearEd25519Verifier>),
 }
 
 impl Protobuf<Any> for AnyClientState {}
@@ -179,8 +180,8 @@ impl ClientStateCommon for AnyClientState {
     }
 }
 
-impl From<TmClientState> for AnyClientState {
-    fn from(value: TmClientState) -> Self {
+impl From<TmClientState<NearEd25519Verifier>> for AnyClientState {
+    fn from(value: TmClientState<NearEd25519Verifier>) -> Self {
         AnyClientState::Tendermint(value)
     }
 }

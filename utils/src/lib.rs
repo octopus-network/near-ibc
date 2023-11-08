@@ -1,4 +1,3 @@
-#![no_std]
 #![deny(
     warnings,
     trivial_casts,
@@ -23,9 +22,9 @@ mod prelude;
 pub mod types;
 
 /// Gas for a complex function call.
-pub const GAS_FOR_COMPLEX_FUNCTION_CALL: Gas = Gas(150_000_000_000_000);
+pub const GAS_FOR_COMPLEX_FUNCTION_CALL: Gas = Gas::from_tgas(150);
 /// Gas for a simple function call.
-pub const GAS_FOR_SIMPLE_FUNCTION_CALL: Gas = Gas(5_000_000_000_000);
+pub const GAS_FOR_SIMPLE_FUNCTION_CALL: Gas = Gas::from_tgas(5);
 
 /// As the `deliver` function may cause storage changes, the caller needs to attach some NEAR
 /// to cover the storage cost. The minimum valid amount is 0.05 NEAR (for 5 kb storage).
@@ -40,6 +39,7 @@ pub const INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT: Balance = 3_000_000_000_000_
 const STORAGE_KEY_FOR_EXTRA_DEPOSIT_COST: &[u8] = b"extra_deposit_cost";
 
 #[derive(BorshSerialize, BorshDeserialize)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct ExtraDepositCost(u128);
 
 impl ExtraDepositCost {
@@ -47,7 +47,7 @@ impl ExtraDepositCost {
     pub fn reset() {
         env::storage_write(
             STORAGE_KEY_FOR_EXTRA_DEPOSIT_COST,
-            &Self(0).try_to_vec().unwrap(),
+            &borsh::to_vec(&Self(0)).unwrap(),
         );
     }
     /// Add the extra deposit cost.
@@ -56,7 +56,7 @@ impl ExtraDepositCost {
         extra_deposit_cost.0 += cost;
         env::storage_write(
             STORAGE_KEY_FOR_EXTRA_DEPOSIT_COST,
-            &extra_deposit_cost.try_to_vec().unwrap(),
+            &borsh::to_vec(&extra_deposit_cost).unwrap(),
         );
     }
     /// Get the extra deposit cost.

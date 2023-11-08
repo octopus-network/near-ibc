@@ -1,4 +1,3 @@
-#![no_std]
 #![deny(
     warnings,
     trivial_casts,
@@ -64,11 +63,12 @@ mod testnet_functions;
 pub mod types;
 pub mod viewer;
 
-pub const VERSION: &str = "v1.1.0-pre.0";
+pub const VERSION: &str = "v1.2.0-pre.0";
 /// The default timeout seconds for the `MsgTransfer` message.
 pub const DEFAULT_TIMEOUT_SECONDS: u64 = 1000;
 
 #[derive(BorshDeserialize, BorshSerialize, BorshStorageKey, Clone, Debug)]
+#[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
     NearIbcStore,
     PortToModule,
@@ -115,6 +115,7 @@ pub enum StorageKey {
 
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct NearIbcContract {
     near_ibc_store: LazyOption<NearIbcStore>,
     /// To support the mutable borrow in `Router::get_route_mut`.
@@ -203,7 +204,7 @@ impl NearIbcContract {
         };
         let minimum_deposit = utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT
             + env::storage_byte_cost()
-                * (32 + cross_chain_asset.try_to_vec().unwrap().len()) as u128;
+                * (32 + borsh::to_vec(&cross_chain_asset).unwrap().len()) as u128;
         assert!(
             env::attached_deposit() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
@@ -214,7 +215,9 @@ impl NearIbcContract {
         ext_token_factory::ext(utils::get_token_factory_contract_id())
             .with_attached_deposit(minimum_deposit)
             .with_static_gas(
-                utils::GAS_FOR_COMPLEX_FUNCTION_CALL - utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
+                utils::GAS_FOR_COMPLEX_FUNCTION_CALL
+                    .checked_sub(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                    .unwrap(),
             )
             .with_unused_gas_weight(0)
             .setup_asset(asset_denom.trace_path, asset_denom.base_denom, metadata);
@@ -242,7 +245,7 @@ impl NearIbcContract {
             "ERR_NOT_ENOUGH_GAS"
         );
         let minimum_deposit = utils::INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT
-            + env::storage_byte_cost() * (channel_id.try_to_vec().unwrap().len() + 16) as u128;
+            + env::storage_byte_cost() * (borsh::to_vec(&channel_id).unwrap().len() + 16) as u128;
         assert!(
             env::attached_deposit() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
@@ -253,7 +256,9 @@ impl NearIbcContract {
         ext_escrow_factory::ext(utils::get_escrow_factory_contract_id())
             .with_attached_deposit(minimum_deposit)
             .with_static_gas(
-                utils::GAS_FOR_COMPLEX_FUNCTION_CALL - utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
+                utils::GAS_FOR_COMPLEX_FUNCTION_CALL
+                    .checked_sub(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                    .unwrap(),
             )
             .with_unused_gas_weight(0)
             .create_escrow(ChannelId::from_str(channel_id.as_str()).unwrap());
@@ -284,7 +289,8 @@ impl NearIbcContract {
             base_denom,
         };
         let minimum_deposit = env::storage_byte_cost()
-            * (asset_denom.try_to_vec().unwrap().len() + token_contract.to_string().len()) as u128;
+            * (borsh::to_vec(&asset_denom).unwrap().len() + token_contract.to_string().len())
+                as u128;
         assert!(
             env::attached_deposit() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
@@ -324,30 +330,6 @@ impl TryInto<PrefixedCoin> for TransferringCoins {
             amount: Amount::from_str(&self.amount.as_str())
                 .map_err(|_| "ERR_INVALID_AMOUNT".to_string())?,
         })
-    }
-}
-
-/// Some sudo functions for testing.
-#[near_bindgen]
-impl NearIbcContract {
-    pub fn cancel_transfer_request_in_channel_escrow(
-        &mut self,
-        channel_id: String,
-        trace_path: String,
-        base_denom: String,
-        sender_id: AccountId,
-        amount: U128,
-    ) {
-        self.assert_governance();
-        let channel_escrow_id =
-            format!("{}.{}", channel_id, utils::get_escrow_factory_contract_id());
-        ext_process_transfer_request_callback::ext(
-            AccountId::from_str(channel_escrow_id.as_str()).unwrap(),
-        )
-        .with_attached_deposit(0)
-        .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
-        .with_unused_gas_weight(0)
-        .cancel_transfer_request(trace_path, base_denom, sender_id, amount);
     }
 }
 

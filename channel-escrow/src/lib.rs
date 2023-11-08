@@ -1,4 +1,3 @@
-#![no_std]
 #![deny(
     warnings,
     trivial_casts,
@@ -12,13 +11,12 @@ extern crate alloc;
 
 use alloc::{
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 use ibc::applications::transfer::PORT_ID_STR;
 use near_contract_standards::fungible_token::core::ext_ft_core;
 use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
+    borsh::{BorshDeserialize, BorshSerialize},
     env,
     json_types::{U128, U64},
     near_bindgen,
@@ -36,6 +34,7 @@ use utils::{
 };
 
 #[derive(BorshSerialize, BorshStorageKey)]
+#[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
     TokenContracts,
     PendingTransferRequests,
@@ -58,6 +57,7 @@ pub struct RegisteredAsset {
 
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct Contract {
     /// The account id of IBC/TAO implementation.
     near_ibc_account: AccountId,
@@ -195,7 +195,7 @@ impl ChannelEscrow for Contract {
         let token_contract = maybe_existed_token_contract.unwrap();
         ext_ft_core::ext(token_contract.clone())
             .with_attached_deposit(1)
-            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 2)
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(2))
             .with_unused_gas_weight(0)
             .ft_transfer(receiver_id, amount.into(), None);
     }
@@ -254,7 +254,7 @@ impl ProcessTransferRequestCallback for Contract {
         let token_contract = maybe_existed_token_contract.unwrap();
         ext_ft_core::ext(token_contract.clone())
             .with_attached_deposit(1)
-            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 2)
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(2))
             .with_unused_gas_weight(0)
             .ft_transfer(sender_id, amount.into(), None);
     }

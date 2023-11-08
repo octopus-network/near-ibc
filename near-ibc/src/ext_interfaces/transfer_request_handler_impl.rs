@@ -49,7 +49,7 @@ impl TransferRequestHandler for NearIbcContract {
             );
             ext_process_transfer_request_callback::ext(env::predecessor_account_id())
                 .with_attached_deposit(0)
-                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
+                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(4))
                 .with_unused_gas_weight(0)
                 .cancel_transfer_request(
                     transfer_request.token_trace_path,

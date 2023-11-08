@@ -13,6 +13,7 @@ use core::fmt::Debug;
 /// when remove them from the queue, the extra storage usage will not be released.
 ///
 #[derive(BorshDeserialize, BorshSerialize)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct IndexedAscendingLookupQueue<K, V>
 where
     K: BorshDeserialize + BorshSerialize + Clone + Ord,
@@ -122,7 +123,7 @@ where
     /// Set max length of the queue.
     pub fn set_max_length(&mut self, max_length: u64) -> ProcessingResult {
         self.max_length = max_length;
-        let max_gas = env::prepaid_gas() * 4 / 5;
+        let max_gas = env::prepaid_gas().saturating_mul(4).saturating_div(5);
         while self.end_index - self.start_index + 1 > self.max_length {
             self.pop_front();
             self.flush();
@@ -139,7 +140,7 @@ where
     }
     /// Clear the queue.
     pub fn clear(&mut self) -> ProcessingResult {
-        let max_gas = env::prepaid_gas() * 4 / 5;
+        let max_gas = env::prepaid_gas().saturating_mul(4).saturating_div(5);
         for index in self.start_index..self.end_index + 1 {
             if let Some(key) = self.index_map.get(&index) {
                 env::storage_remove(

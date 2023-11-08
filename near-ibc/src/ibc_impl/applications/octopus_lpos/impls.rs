@@ -112,7 +112,7 @@ impl OctopusLposExecutionContext for OctopusLposModule {
             })?,
         )
         .with_attached_deposit(0)
-        .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 10)
+        .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(10))
         .with_unused_gas_weight(0)
         .slash_validator(slach_packet_data);
         Ok(())

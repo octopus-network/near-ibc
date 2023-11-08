@@ -210,6 +210,7 @@ impl ExecutionContext for NearIbcStore {
             conn_id
         );
         #[derive(BorshDeserialize, BorshSerialize, Debug)]
+        #[borsh(crate = "near_sdk::borsh")]
         struct ConnectionIds(pub Vec<ConnectionId>);
         let key = client_connection_path.to_string().into_bytes();
         let data = if env::storage_has_key(&key) {
@@ -220,14 +221,14 @@ impl ExecutionContext for NearIbcStore {
                     })
                 })?;
             connection_ids.0.push(conn_id);
-            connection_ids.try_to_vec().map_err(|e| {
+            borsh::to_vec(&connection_ids).map_err(|e| {
                 ContextError::ConnectionError(ConnectionError::Other {
                     description: format!("ConnectionIds encoding error: {:?}", e),
                 })
             })?
         } else {
             let connection_ids = ConnectionIds(vec![conn_id]);
-            connection_ids.try_to_vec().map_err(|e| {
+            borsh::to_vec(&connection_ids).map_err(|e| {
                 ContextError::ConnectionError(ConnectionError::Other {
                     description: format!("ConnectionIds encoding error: {:?}", e),
                 })
@@ -303,7 +304,7 @@ impl ExecutionContext for NearIbcStore {
             receipt_path,
             receipt
         );
-        let data = receipt.try_to_vec().unwrap();
+        let data = borsh::to_vec(&receipt).unwrap();
         let key = receipt_path.to_string().into_bytes();
         env::storage_write(&key, &data);
         //
@@ -390,7 +391,7 @@ impl ExecutionContext for NearIbcStore {
             seq_send_path,
             seq
         );
-        let data = seq.try_to_vec().unwrap();
+        let data = borsh::to_vec(&seq).unwrap();
         let key = seq_send_path.to_string().into_bytes();
         env::storage_write(&key, &data);
         Ok(())
@@ -406,7 +407,7 @@ impl ExecutionContext for NearIbcStore {
             seq_recv_path,
             seq
         );
-        let data = seq.try_to_vec().unwrap();
+        let data = borsh::to_vec(&seq).unwrap();
         let key = seq_recv_path.to_string().into_bytes();
         env::storage_write(&key, &data);
         Ok(())
@@ -422,7 +423,7 @@ impl ExecutionContext for NearIbcStore {
             seq_ack_path,
             seq
         );
-        let data = seq.try_to_vec().unwrap();
+        let data = borsh::to_vec(&seq).unwrap();
         let key = seq_ack_path.to_string().into_bytes();
         env::storage_write(&key, &data);
         Ok(())

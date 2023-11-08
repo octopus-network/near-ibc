@@ -1,4 +1,3 @@
-#![no_std]
 #![deny(
     warnings,
     trivial_casts,
@@ -13,7 +12,6 @@ extern crate alloc;
 use alloc::{
     format,
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 use ibc::core::ics24_host::identifier::ChannelId;
@@ -29,6 +27,7 @@ use near_sdk::{
 use utils::{interfaces::EscrowFactory, ExtraDepositCost};
 
 #[derive(BorshSerialize, BorshStorageKey)]
+#[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
     ChannelIdSet,
     EscrowContractWasm,
@@ -36,6 +35,7 @@ pub enum StorageKey {
 
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct Contract {
     channel_id_set: UnorderedSet<ChannelId>,
 }
@@ -82,7 +82,7 @@ impl EscrowFactory for Contract {
                 .create_account()
                 .transfer(utils::INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT)
                 .deploy_contract(
-                    env::storage_read(&StorageKey::EscrowContractWasm.try_to_vec().unwrap())
+                    env::storage_read(&borsh::to_vec(&StorageKey::EscrowContractWasm).unwrap())
                         .unwrap(),
                 )
                 .function_call(
@@ -125,7 +125,7 @@ pub extern "C" fn store_wasm_of_channel_escrow() {
     let input = env::input().expect("ERR_NO_INPUT");
     let sha256_hash = env::sha256(&input);
 
-    let current_len = env::storage_read(&StorageKey::EscrowContractWasm.try_to_vec().unwrap())
+    let current_len = env::storage_read(&borsh::to_vec(&StorageKey::EscrowContractWasm).unwrap())
         .map_or_else(|| 0, |bytes| bytes.len());
     let blob_len = input.len();
     if blob_len > current_len {
@@ -139,7 +139,7 @@ pub extern "C" fn store_wasm_of_channel_escrow() {
     }
 
     env::storage_write(
-        &StorageKey::EscrowContractWasm.try_to_vec().unwrap(),
+        &borsh::to_vec(&StorageKey::EscrowContractWasm).unwrap(),
         &input,
     );
 

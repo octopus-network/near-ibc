@@ -4,12 +4,13 @@ use crate::{
 };
 use ibc::core::{ics24_host::identifier::PortId, router::ModuleId};
 use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
+    borsh::{BorshDeserialize, BorshSerialize},
     AccountId,
 };
 
 /// A simple struct for supporting the mutable borrow in `Router::get_route_mut`.
 #[derive(BorshDeserialize, BorshSerialize)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct ModuleHolder {
     pub transfer_module: TransferModule,
     pub octopus_lpos_module: OctopusLposModule,

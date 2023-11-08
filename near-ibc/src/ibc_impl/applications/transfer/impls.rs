@@ -41,7 +41,7 @@ impl TokenTransferExecutionContext for TransferModule {
         } else if sender_id.ends_with(prefixed_ef.as_str()) {
             ext_channel_escrow::ext(from.0.clone())
                 .with_attached_deposit(1)
-                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
+                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(4))
                 .with_unused_gas_weight(0)
                 .do_transfer(
                     trace_path,
@@ -69,7 +69,7 @@ impl TokenTransferExecutionContext for TransferModule {
         );
         ext_token_factory::ext(utils::get_token_factory_contract_id())
             .with_attached_deposit(utils::STORAGE_DEPOSIT_FOR_MINT_TOKEN)
-            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 8)
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(8))
             .with_unused_gas_weight(0)
             .mint_asset(
                 amt.denom.trace_path.to_string(),

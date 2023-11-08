@@ -10,10 +10,36 @@ fn assert_testnet() {
     );
 }
 
-#[near_bindgen]
-impl NearIbcContract {
+pub trait TestnetFunctions {
     ///
-    pub fn clear_ibc_events_history(&mut self) -> ProcessingResult {
+    fn clear_ibc_events_history(&mut self) -> ProcessingResult;
+    ///
+    fn clear_ibc_store_counters(&mut self);
+    ///
+    fn clear_clients(&mut self) -> ProcessingResult;
+    ///
+    fn clear_connections(&mut self) -> ProcessingResult;
+    ///
+    fn clear_channels(&mut self) -> ProcessingResult;
+    ///
+    fn remove_client(&mut self, client_id: ClientId);
+    ///
+    fn remove_raw_client(&mut self, client_id: ClientId);
+    ///
+    fn cancel_transfer_request_in_channel_escrow(
+        &mut self,
+        channel_id: String,
+        trace_path: String,
+        base_denom: String,
+        sender_id: AccountId,
+        amount: U128,
+    );
+}
+
+#[near_bindgen]
+impl TestnetFunctions for NearIbcContract {
+    ///
+    fn clear_ibc_events_history(&mut self) -> ProcessingResult {
         assert_testnet();
         self.assert_governance();
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
@@ -22,7 +48,7 @@ impl NearIbcContract {
         result
     }
     ///
-    pub fn clear_ibc_store_counters(&mut self) {
+    fn clear_ibc_store_counters(&mut self) {
         assert_testnet();
         self.assert_governance();
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
@@ -30,10 +56,10 @@ impl NearIbcContract {
         self.near_ibc_store.set(&near_ibc_store);
     }
     ///
-    pub fn clear_clients(&mut self) -> ProcessingResult {
+    fn clear_clients(&mut self) -> ProcessingResult {
         assert_testnet();
         self.assert_governance();
-        let max_gas = env::prepaid_gas() * 4 / 5;
+        let max_gas = env::prepaid_gas().saturating_mul(4).saturating_div(5);
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
         let client_ids: Vec<ClientId> = near_ibc_store
             .client_id_set
@@ -54,10 +80,10 @@ impl NearIbcContract {
         ProcessingResult::Ok
     }
     ///
-    pub fn clear_connections(&mut self) -> ProcessingResult {
+    fn clear_connections(&mut self) -> ProcessingResult {
         assert_testnet();
         self.assert_governance();
-        let max_gas = env::prepaid_gas() * 4 / 5;
+        let max_gas = env::prepaid_gas().saturating_mul(4).saturating_div(5);
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
         let connection_ids: Vec<ConnectionId> = near_ibc_store
             .connection_id_set
@@ -78,10 +104,10 @@ impl NearIbcContract {
         ProcessingResult::Ok
     }
     ///
-    pub fn clear_channels(&mut self) -> ProcessingResult {
+    fn clear_channels(&mut self) -> ProcessingResult {
         assert_testnet();
         self.assert_governance();
-        let max_gas = env::prepaid_gas() * 4 / 5;
+        let max_gas = env::prepaid_gas().saturating_mul(4).saturating_div(5);
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
         let port_channel_ids: Vec<(PortId, ChannelId)> = near_ibc_store
             .port_channel_id_set
@@ -102,7 +128,7 @@ impl NearIbcContract {
         ProcessingResult::Ok
     }
     ///
-    pub fn remove_client(&mut self, client_id: ClientId) {
+    fn remove_client(&mut self, client_id: ClientId) {
         assert_testnet();
         self.assert_governance();
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
@@ -110,7 +136,7 @@ impl NearIbcContract {
         self.near_ibc_store.set(&near_ibc_store);
     }
     ///
-    pub fn remove_raw_client(&mut self, client_id: ClientId) {
+    fn remove_raw_client(&mut self, client_id: ClientId) {
         assert_testnet();
         self.assert_governance();
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
@@ -127,5 +153,25 @@ impl NearIbcContract {
         near_ibc_store.client_id_set.remove(&client_id);
         self.near_ibc_store.set(&near_ibc_store);
         env::storage_remove(&ClientStatePath::new(&client_id).to_string().into_bytes());
+    }
+    //
+    fn cancel_transfer_request_in_channel_escrow(
+        &mut self,
+        channel_id: String,
+        trace_path: String,
+        base_denom: String,
+        sender_id: AccountId,
+        amount: U128,
+    ) {
+        self.assert_governance();
+        let channel_escrow_id =
+            format!("{}.{}", channel_id, utils::get_escrow_factory_contract_id());
+        ext_process_transfer_request_callback::ext(
+            AccountId::from_str(channel_escrow_id.as_str()).unwrap(),
+        )
+        .with_attached_deposit(0)
+        .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(4))
+        .with_unused_gas_weight(0)
+        .cancel_transfer_request(trace_path, base_denom, sender_id, amount);
     }
 }

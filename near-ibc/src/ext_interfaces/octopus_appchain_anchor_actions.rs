@@ -1,4 +1,4 @@
-use crate::*;
+use crate::{context::NearEd25519Verifier, *};
 use ibc::{
     clients::ics07_tendermint::{
         client_state::ClientState as TmClientState,
@@ -15,7 +15,7 @@ pub trait OctopusAppchainAnchorActions {
     /// Create client for the corresponding Octopus appchain.
     fn create_client_for_appchain(
         &mut self,
-        client_state: TmClientState,
+        client_state: TmClientState<NearEd25519Verifier>,
         consensus_state: TmConsensusState,
     );
     /// Send a VSC packet to the corresponding Octopus appchain.
@@ -32,7 +32,7 @@ impl OctopusAppchainAnchorActions for NearIbcContract {
     //
     fn create_client_for_appchain(
         &mut self,
-        client_state: TmClientState,
+        client_state: TmClientState<NearEd25519Verifier>,
         consensus_state: TmConsensusState,
     ) {
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();

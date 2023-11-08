@@ -19,5 +19,5 @@ panic = "abort"
 overflow-checks = true
 
 [patch.crates-io]
-ibc = { git = "https://github.com/octopus-network/ibc-rs.git", branch = "v0.45.0-octopus-for-near-ibc" }
-ibc-proto = { git = "https://github.com/octopus-network/ibc-proto-rs.git", branch = "down-borsh-version" }
+ibc = { git = "https://github.com/octopus-network/ibc-rs.git", branch = "v0.45.0-generic-tendermint-verifier" }
+ibc-proto = { git = "https://github.com/octopus-network/ibc-proto-rs.git", branch = "upgrade-borsh-version" }
