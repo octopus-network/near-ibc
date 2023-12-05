@@ -149,7 +149,7 @@ impl NearIbcContract {
         // Deliver messages to `ibc-rs`
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
 
-        messages.into_iter().fold(vec![], |mut errors, msg| {
+        let errors = messages.into_iter().fold(vec![], |mut errors, msg| {
             match MsgEnvelope::try_from(msg.clone()) {
                 Ok(msg) => match ibc::core::dispatch(&mut near_ibc_store, self, msg.clone()) {
                     Ok(()) => (),
@@ -165,6 +165,9 @@ impl NearIbcContract {
             }
             errors
         });
+        if errors.len() > 0 {
+            env::panic_str("Failed to deliver messages. Check logs for details.");
+        }
         near_ibc_store.flush();
         self.near_ibc_store.set(&near_ibc_store);
         // Refund unused deposit.
