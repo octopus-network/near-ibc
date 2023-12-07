@@ -166,7 +166,9 @@ impl NearIbcContract {
             errors
         });
         if errors.len() > 0 {
-            env::panic_str("Failed to deliver messages. Check logs for details.");
+            log!(
+                r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0","event":"ERR_DELIVER_MESSAGE"}}"#,
+            );
         }
         near_ibc_store.flush();
         self.near_ibc_store.set(&near_ibc_store);
