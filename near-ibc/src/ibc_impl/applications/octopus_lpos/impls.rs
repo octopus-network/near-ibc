@@ -103,7 +103,7 @@ impl OctopusLposExecutionContext for OctopusLposModule {
     ) -> Result<(), OctopusLposError> {
         let anchor_account_id = format!(
             "{}.{}",
-            consumer_chain_id.as_str(),
+            remove_suffix(consumer_chain_id.as_str()),
             self.appchain_registry_account.to_string()
         );
         ext_octopus_appchain_anchor_ibc::ext(
@@ -127,7 +127,7 @@ impl OctopusLposExecutionContext for OctopusLposModule {
     ) -> Result<(), OctopusLposError> {
         let anchor_account_id = format!(
             "{}.{}",
-            consumer_chain_id.as_str(),
+            remove_suffix(consumer_chain_id.as_str()),
             self.appchain_registry_account.to_string()
         );
         ext_octopus_appchain_anchor_ibc::ext(
