@@ -1,6 +1,6 @@
 use crate::{types::ProcessingResult, *};
-use ibc::core::ics24_host::path::{ClientConsensusStatePath, ClientStatePath};
-use near_sdk::near_bindgen;
+use ibc::core::host::types::path::{ClientConsensusStatePath, ClientStatePath};
+use near_sdk::{near_bindgen, NearToken};
 
 ///
 fn assert_testnet() {
@@ -143,7 +143,7 @@ impl TestnetFunctions for NearIbcContract {
         near_ibc_store.client_processed_heights.remove(&client_id);
         near_ibc_store.client_processed_times.remove(&client_id);
         env::storage_remove(
-            &ClientConsensusStatePath::new(&client_id, &Height::new(0, 1).unwrap())
+            &ClientConsensusStatePath::new(client_id.clone(), 0, 1)
                 .to_string()
                 .into_bytes(),
         );
@@ -169,7 +169,7 @@ impl TestnetFunctions for NearIbcContract {
         ext_process_transfer_request_callback::ext(
             AccountId::from_str(channel_escrow_id.as_str()).unwrap(),
         )
-        .with_attached_deposit(0)
+        .with_attached_deposit(NearToken::from_yoctonear(0))
         .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(4))
         .with_unused_gas_weight(0)
         .cancel_transfer_request(trace_path, base_denom, sender_id, amount);

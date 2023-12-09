@@ -1,21 +1,29 @@
 use crate::{context::NearEd25519Verifier, *};
+use core::time::Duration;
 use ibc::{
-    clients::ics07_tendermint::{
+    clients::tendermint::{
         client_state::ClientState as TmClientState,
         consensus_state::ConsensusState as TmConsensusState,
+        types::{AllowUpdate, ClientState as TmClientStateType, TrustThreshold},
     },
     core::{
-        ics02_client::msgs::{create_client::MsgCreateClient, ClientMsg},
-        ics24_host::identifier::ChainId,
+        client::types::msgs::{ClientMsg, MsgCreateClient},
+        commitment_types::specs::ProofSpecs,
+        host::types::identifiers::ChainId,
     },
 };
 use near_sdk::json_types::U64;
 
 pub trait OctopusAppchainAnchorActions {
     /// Create client for the corresponding Octopus appchain.
-    fn create_client_for_appchain(
+    fn create_tendermint_client_for_appchain(
         &mut self,
-        client_state: TmClientState<NearEd25519Verifier>,
+        chain_id: ChainId,
+        initial_height: Height,
+        trusting_period: U64,
+        unbonding_period: U64,
+        max_clock_drift: U64,
+        upgrade_path: Vec<String>,
         consensus_state: TmConsensusState,
     );
     /// Send a VSC packet to the corresponding Octopus appchain.
@@ -30,14 +38,19 @@ pub trait OctopusAppchainAnchorActions {
 #[near_bindgen]
 impl OctopusAppchainAnchorActions for NearIbcContract {
     //
-    fn create_client_for_appchain(
+    fn create_tendermint_client_for_appchain(
         &mut self,
-        client_state: TmClientState<NearEd25519Verifier>,
+        chain_id: ChainId,
+        initial_height: Height,
+        trusting_period: U64,
+        unbonding_period: U64,
+        max_clock_drift: U64,
+        upgrade_path: Vec<String>,
         consensus_state: TmConsensusState,
     ) {
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
         let predecessor_account_id = env::predecessor_account_id().to_string();
-        let (_, parent_account) = predecessor_account_id.split_once(".").unwrap();
+        let (chain_id_prefix, parent_account) = predecessor_account_id.split_once(".").unwrap();
         assert!(
             parent_account
                 == self
@@ -48,12 +61,33 @@ impl OctopusAppchainAnchorActions for NearIbcContract {
                     .as_str(),
             "ERR_INVALID_CALLER, only octopus appchain anchor accounts can call this function."
         );
+        assert!(
+            chain_id.to_string().starts_with(chain_id_prefix),
+            "ERR_INVALID_CHAIN_ID, chain id must start with the subaccount id of the predecessor."
+        );
+        //
+        let client_state_type = TmClientStateType::<NearEd25519Verifier>::new(
+            chain_id,
+            TrustThreshold::TWO_THIRDS,
+            Duration::from_secs(trusting_period.0),
+            Duration::from_secs(unbonding_period.0),
+            Duration::from_secs(max_clock_drift.0),
+            initial_height,
+            ProofSpecs::cosmos(),
+            upgrade_path,
+            AllowUpdate {
+                after_expiry: true,
+                after_misbehaviour: true,
+            },
+        )
+        .unwrap_or_else(|e| panic!("Failed to create client state: {:?}", e));
+
         let msg = MsgCreateClient {
-            client_state: client_state.into(),
+            client_state: TmClientState::from(client_state_type).into(),
             consensus_state: consensus_state.into(),
             signer: Signer::from(env::current_account_id().to_string()),
         };
-        match ibc::core::dispatch(
+        match ibc::core::handler::entrypoint::dispatch(
             &mut near_ibc_store,
             self,
             MsgEnvelope::Client(ClientMsg::CreateClient(msg)),

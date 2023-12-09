@@ -1,30 +1,22 @@
 use crate::{
-    collections::{
-        IndexedAscendingLookupQueue, IndexedAscendingQueueViewer, IndexedAscendingSimpleQueue,
-    },
-    prelude::*,
-    types::ProcessingResult,
-    StorageKey,
+    collections::IndexedAscendingLookupQueue, prelude::*, types::ProcessingResult, StorageKey,
 };
 use core::fmt::{Debug, Formatter};
-use ibc::{
-    core::{
-        events::IbcEvent,
-        ics04_channel::packet::Sequence,
-        ics24_host::{
-            identifier::{ChannelId, ClientId, ConnectionId, PortId},
-            path::{
-                AckPath, ClientConnectionPath, ClientConsensusStatePath, ClientStatePath,
-                CommitmentPath, ConnectionPath, ReceiptPath, SeqAckPath, SeqRecvPath, SeqSendPath,
-            },
+use ibc::core::{
+    client::types::Height,
+    handler::types::events::IbcEvent,
+    host::types::{
+        identifiers::{ChannelId, ClientId, ConnectionId, PortId, Sequence},
+        path::{
+            AckPath, ClientConnectionPath, ClientConsensusStatePath, ClientStatePath,
+            CommitmentPath, ConnectionPath, ReceiptPath, SeqAckPath, SeqRecvPath, SeqSendPath,
         },
     },
-    Height,
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env, log,
-    store::{LookupMap, UnorderedSet},
+    store::{LookupMap, UnorderedMap, UnorderedSet},
 };
 use serde::{Deserialize, Serialize};
 
@@ -37,14 +29,11 @@ pub struct NearIbcStore {
     /// The client ids of the clients.
     pub client_id_set: UnorderedSet<ClientId>,
     pub client_counter: u64,
-    pub client_processed_times:
-        LookupMap<ClientId, IndexedAscendingLookupQueue<Height, NearTimeStamp>>,
-    pub client_processed_heights:
-        LookupMap<ClientId, IndexedAscendingLookupQueue<Height, HostHeight>>,
+    pub client_processed_times: LookupMap<ClientId, UnorderedMap<Height, NearTimeStamp>>,
+    pub client_processed_heights: LookupMap<ClientId, UnorderedMap<Height, HostHeight>>,
     /// This collection contains the heights corresponding to all consensus states of
     /// all clients stored in the contract.
-    pub client_consensus_state_height_sets:
-        LookupMap<ClientId, IndexedAscendingSimpleQueue<Height>>,
+    pub client_consensus_state_height_sets: LookupMap<ClientId, UnorderedSet<Height>>,
     /// The connection ids of the connections.
     pub connection_id_set: UnorderedSet<ConnectionId>,
     pub connection_counter: u64,
@@ -134,15 +123,17 @@ impl NearIbcStore {
         self.client_consensus_state_height_sets
             .get(client_id)
             .map(|heights| {
-                heights.keys().iter().for_each(|height| {
-                    height.map(|height| {
-                        env::storage_remove(
-                            &ClientConsensusStatePath::new(client_id, height)
-                                .to_string()
-                                .into_bytes(),
+                heights.iter().for_each(|height| {
+                    env::storage_remove(
+                        &ClientConsensusStatePath::new(
+                            client_id.clone(),
+                            height.revision_number(),
+                            height.revision_height(),
                         )
-                    });
-                })
+                        .to_string()
+                        .into_bytes(),
+                    );
+                });
             });
         self.client_consensus_state_height_sets.remove(client_id);
         self.client_consensus_state_height_sets.flush();

@@ -3,33 +3,36 @@ use crate::{context::NearIbcStore, prelude::*};
 use core::{str::FromStr, time::Duration};
 use ibc::{
     core::{
-        ics02_client::error::ClientError,
-        ics03_connection::{connection::ConnectionEnd, error::ConnectionError},
-        ics04_channel::{
+        channel::types::{
             channel::ChannelEnd,
             commitment::{AcknowledgementCommitment, PacketCommitment},
             error::{ChannelError, PacketError},
-            packet::{Receipt, Sequence},
+            packet::Receipt,
         },
-        ics23_commitment::commitment::CommitmentPrefix,
-        ics24_host::{
-            identifier::{ClientId, ConnectionId},
-            path::{
-                AckPath, ChannelEndPath, ClientConsensusStatePath, ClientStatePath, CommitmentPath,
-                ConnectionPath, ReceiptPath, SeqAckPath, SeqRecvPath, SeqSendPath,
+        client::types::{error::ClientError, Height},
+        commitment_types::commitment::CommitmentPrefix,
+        connection::types::{error::ConnectionError, ConnectionEnd},
+        handler::types::error::ContextError,
+        host::{
+            types::{
+                identifiers::{ClientId, ConnectionId, Sequence},
+                path::{
+                    AckPath, ChannelEndPath, ClientConsensusStatePath, ClientStatePath,
+                    CommitmentPath, ConnectionPath, ReceiptPath, SeqAckPath, SeqRecvPath,
+                    SeqSendPath,
+                },
             },
+            ValidationContext,
         },
-        timestamp::Timestamp,
-        ContextError, ValidationContext,
     },
-    Height, Signer,
+    primitives::{Signer, Timestamp},
 };
 use ibc_proto::{
     google::protobuf::Any,
     ibc::core::{
         channel::v1::Channel as RawChannelEnd, connection::v1::ConnectionEnd as RawConnectionEnd,
     },
-    protobuf::Protobuf,
+    Protobuf,
 };
 use near_sdk::{borsh::BorshDeserialize, env, AccountId};
 
@@ -39,7 +42,7 @@ const CONTRACT_DATA: u8 = 9;
 const ACCOUNT_DATA_SEPARATOR: u8 = b',';
 
 impl ValidationContext for NearIbcStore {
-    type ClientValidationContext = Self;
+    type V = Self;
 
     type E = Self;
 
@@ -86,8 +89,8 @@ impl ValidationContext for NearIbcStore {
                 ClientError::ConsensusStateNotFound {
                     client_id: client_cons_state_path.client_id.clone(),
                     height: Height::new(
-                        client_cons_state_path.epoch,
-                        client_cons_state_path.height,
+                        client_cons_state_path.revision_number,
+                        client_cons_state_path.revision_height,
                     )?,
                 },
             )),
@@ -276,44 +279,6 @@ impl ValidationContext for NearIbcStore {
         }
     }
 
-    fn client_update_time(
-        &self,
-        client_id: &ClientId,
-        height: &Height,
-    ) -> Result<Timestamp, ContextError> {
-        self.client_processed_times
-            .get(client_id)
-            .and_then(|processed_times| processed_times.get_value_by_key(height))
-            .map(|ts| Timestamp::from_nanoseconds(*ts).unwrap())
-            .ok_or_else(|| {
-                ContextError::ClientError(ClientError::Other {
-                    description: format!(
-                        "Client update time not found. client_id: {}, height: {}",
-                        client_id, height
-                    ),
-                })
-            })
-    }
-
-    fn client_update_height(
-        &self,
-        client_id: &ClientId,
-        height: &Height,
-    ) -> Result<Height, ContextError> {
-        self.client_processed_heights
-            .get(client_id)
-            .and_then(|processed_heights| processed_heights.get_value_by_key(height))
-            .map(|height: &Height| height.clone())
-            .ok_or_else(|| {
-                ContextError::ClientError(ClientError::Other {
-                    description: format!(
-                        "Client update height not found. client_id: {}, height: {}",
-                        client_id, height
-                    ),
-                })
-            })
-    }
-
     fn channel_counter(&self) -> Result<u64, ContextError> {
         Ok(self.channel_counter)
     }
@@ -334,7 +299,7 @@ impl ValidationContext for NearIbcStore {
         Ok(())
     }
 
-    fn get_client_validation_context(&self) -> &Self::ClientValidationContext {
+    fn get_client_validation_context(&self) -> &Self::V {
         &self
     }
 }

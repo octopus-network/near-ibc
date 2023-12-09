@@ -1,46 +1,42 @@
 use super::{client_state::AnyClientState, consensus_state::AnyConsensusState};
 use crate::{
-    collections::{
-        IndexedAscendingLookupQueue, IndexedAscendingQueueViewer, IndexedAscendingSimpleQueue,
-    },
-    context::NearIbcStore,
-    events::EventEmitter,
-    prelude::*,
-    StorageKey,
+    collections::IndexedAscendingQueueViewer, context::NearIbcStore, events::EventEmitter,
+    prelude::*, StorageKey,
 };
 use core::fmt::Debug;
 use ibc::{
     core::{
-        events::IbcEvent,
-        ics02_client::ClientExecutionContext,
-        ics03_connection::{connection::ConnectionEnd, error::ConnectionError},
-        ics04_channel::{
+        channel::types::{
             channel::ChannelEnd,
             commitment::{AcknowledgementCommitment, PacketCommitment},
-            packet::{Receipt, Sequence},
+            packet::Receipt,
         },
-        ics24_host::{
-            identifier::{ChannelId, ClientId, ConnectionId, PortId},
-            path::{
-                AckPath, ChannelEndPath, ClientConnectionPath, ClientConsensusStatePath,
-                ClientStatePath, CommitmentPath, ConnectionPath, ReceiptPath, SeqAckPath,
-                SeqRecvPath, SeqSendPath,
+        client::{context::ClientExecutionContext, types::Height},
+        connection::types::{error::ConnectionError, ConnectionEnd},
+        handler::types::{error::ContextError, events::IbcEvent},
+        host::{
+            types::{
+                identifiers::{ChannelId, ClientId, ConnectionId, PortId, Sequence},
+                path::{
+                    AckPath, ChannelEndPath, ClientConnectionPath, ClientConsensusStatePath,
+                    ClientStatePath, CommitmentPath, ConnectionPath, ReceiptPath, SeqAckPath,
+                    SeqRecvPath, SeqSendPath,
+                },
             },
+            ExecutionContext, ValidationContext,
         },
-        timestamp::Timestamp,
-        ContextError, ExecutionContext, ValidationContext,
     },
-    Height,
+    primitives::Timestamp,
 };
-use ibc_proto::protobuf::Protobuf;
+use ibc_proto::Protobuf;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env, log,
-    store::{LookupMap, UnorderedSet},
+    store::{LookupMap, UnorderedMap, UnorderedSet},
 };
 
 impl ClientExecutionContext for NearIbcStore {
-    type ClientValidationContext = Self;
+    type V = Self;
 
     type AnyClientState = AnyClientState;
 
@@ -74,7 +70,7 @@ impl ClientExecutionContext for NearIbcStore {
             consensus_state_path,
             consensus_state
         );
-        let data = Protobuf::encode_vec(&consensus_state);
+        let data = Protobuf::encode_vec(consensus_state);
         let key = consensus_state_path.to_string().into_bytes();
         env::storage_write(&key, &data);
         //
@@ -84,30 +80,22 @@ impl ClientExecutionContext for NearIbcStore {
         {
             self.client_consensus_state_height_sets.insert(
                 consensus_state_path.client_id.clone(),
-                IndexedAscendingSimpleQueue::new(
-                    StorageKey::ClientConsensusStateHeightSet {
-                        client_id: consensus_state_path.client_id.clone(),
-                    },
-                    u64::MAX,
-                ),
+                UnorderedSet::new(StorageKey::ClientConsensusStateHeightSet {
+                    client_id: consensus_state_path.client_id.clone(),
+                }),
             );
         }
         self.client_consensus_state_height_sets
             .get_mut(&consensus_state_path.client_id)
             .map(|heights| {
-                heights.push_back(
-                    Height::new(consensus_state_path.epoch, consensus_state_path.height).unwrap(),
+                heights.insert(
+                    Height::new(
+                        consensus_state_path.revision_number,
+                        consensus_state_path.revision_height,
+                    )
+                    .unwrap(),
                 );
-                heights.flush();
             });
-        Ok(())
-    }
-}
-
-impl ExecutionContext for NearIbcStore {
-    fn increase_client_counter(&mut self) -> Result<(), ContextError> {
-        self.client_counter += 1;
-        log!("client_counter has increased to: {}", self.client_counter);
         Ok(())
     }
 
@@ -126,22 +114,15 @@ impl ExecutionContext for NearIbcStore {
         if !self.client_processed_times.contains_key(&client_id) {
             self.client_processed_times.insert(
                 client_id.clone(),
-                IndexedAscendingLookupQueue::new(
-                    StorageKey::ClientProcessedTimesIndex {
-                        client_id: client_id.clone(),
-                    },
-                    StorageKey::ClientProcessedTimesKey {
-                        client_id: client_id.clone(),
-                    },
-                    u64::MAX,
-                ),
+                UnorderedMap::new(StorageKey::ClientProcessedTimesMap {
+                    client_id: client_id.clone(),
+                }),
             );
         }
         self.client_processed_times
             .get_mut(&client_id)
             .map(|processed_times| {
-                processed_times.push_back((height, timestamp.nanoseconds()));
-                processed_times.flush();
+                processed_times.insert(height, timestamp.nanoseconds());
             });
         Ok(())
     }
@@ -161,23 +142,82 @@ impl ExecutionContext for NearIbcStore {
         if !self.client_processed_heights.contains_key(&client_id) {
             self.client_processed_heights.insert(
                 client_id.clone(),
-                IndexedAscendingLookupQueue::new(
-                    StorageKey::ClientProcessedHeightsIndex {
-                        client_id: client_id.clone(),
-                    },
-                    StorageKey::ClientProcessedHeightsKey {
-                        client_id: client_id.clone(),
-                    },
-                    u64::MAX,
-                ),
+                UnorderedMap::new(StorageKey::ClientProcessedHeightsMap {
+                    client_id: client_id.clone(),
+                }),
             );
         }
         self.client_processed_heights
             .get_mut(&client_id)
             .map(|processed_heights| {
-                processed_heights.push_back((height, host_height));
-                processed_heights.flush();
+                processed_heights.insert(height, host_height);
             });
+        Ok(())
+    }
+
+    fn delete_consensus_state(
+        &mut self,
+        consensus_state_path: ClientConsensusStatePath,
+    ) -> Result<(), ContextError> {
+        log!("delete_consensus_state - path: {}", consensus_state_path,);
+        let key = consensus_state_path.to_string().into_bytes();
+        env::storage_remove(&key);
+        //
+        self.client_consensus_state_height_sets
+            .get_mut(&consensus_state_path.client_id)
+            .map(|heights| {
+                heights.remove(
+                    &Height::new(
+                        consensus_state_path.revision_number,
+                        consensus_state_path.revision_height,
+                    )
+                    .unwrap(),
+                );
+            });
+        Ok(())
+    }
+
+    fn delete_update_time(
+        &mut self,
+        client_id: ClientId,
+        height: Height,
+    ) -> Result<(), ContextError> {
+        log!(
+            "delete_update_time - client_id: {}, height: {}",
+            client_id,
+            height,
+        );
+        self.client_processed_times
+            .get_mut(&client_id)
+            .map(|processed_times| {
+                processed_times.remove(&height);
+            });
+        Ok(())
+    }
+
+    fn delete_update_height(
+        &mut self,
+        client_id: ClientId,
+        height: Height,
+    ) -> Result<(), ContextError> {
+        log!(
+            "delete_update_height - client_id: {}, height: {}",
+            client_id,
+            height,
+        );
+        self.client_processed_heights
+            .get_mut(&client_id)
+            .map(|processed_heights| {
+                processed_heights.remove(&height);
+            });
+        Ok(())
+    }
+}
+
+impl ExecutionContext for NearIbcStore {
+    fn increase_client_counter(&mut self) -> Result<(), ContextError> {
+        self.client_counter += 1;
+        log!("client_counter has increased to: {}", self.client_counter);
         Ok(())
     }
 

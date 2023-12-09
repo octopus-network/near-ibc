@@ -1,19 +1,19 @@
 use crate::{context::NearIbcStoreHost, prelude::*};
 use core::{fmt::Debug, str::FromStr};
 use ibc::{
-    applications::transfer::packet::PacketData,
+    apps::transfer::types::packet::PacketData,
     core::{
-        ics04_channel::{
+        channel::types::{
             acknowledgement::Acknowledgement,
             channel::{Counterparty, Order},
             error::{ChannelError, PacketError},
             packet::Packet,
             Version,
         },
-        ics24_host::identifier::{ChannelId, ConnectionId, PortId},
-        router::{Module, ModuleExtras},
+        host::types::identifiers::{ChannelId, ConnectionId, PortId},
+        router::{module::Module, types::module::ModuleExtras},
     },
-    Signer,
+    primitives::Signer,
 };
 use ibc_proto::ibc::apps::transfer::v2::FungibleTokenPacketData;
 use near_sdk::{
@@ -41,7 +41,7 @@ impl Module for TransferModule {
         counterparty: &Counterparty,
         version: &Version,
     ) -> Result<Version, ChannelError> {
-        ibc::applications::transfer::context::on_chan_open_init_validate(
+        ibc::apps::transfer::module::on_chan_open_init_validate(
             self,
             order,
             connection_hops,
@@ -65,7 +65,7 @@ impl Module for TransferModule {
         counterparty: &Counterparty,
         counterparty_version: &Version,
     ) -> Result<Version, ChannelError> {
-        ibc::applications::transfer::context::on_chan_open_try_validate(
+        ibc::apps::transfer::module::on_chan_open_try_validate(
             self,
             order,
             connection_hops,
@@ -86,7 +86,7 @@ impl Module for TransferModule {
         channel_id: &ChannelId,
         counterparty_version: &Version,
     ) -> Result<(), ChannelError> {
-        ibc::applications::transfer::context::on_chan_open_ack_validate(
+        ibc::apps::transfer::module::on_chan_open_ack_validate(
             self,
             port_id,
             channel_id,
@@ -105,12 +105,10 @@ impl Module for TransferModule {
         // Create and initialize the escrow sub-account for this channel.
 
         // Call default implementation.
-        ibc::applications::transfer::context::on_chan_open_confirm_validate(
-            self, port_id, channel_id,
-        )
-        .map_err(|e| ChannelError::AppModule {
-            description: e.to_string(),
-        })
+        ibc::apps::transfer::module::on_chan_open_confirm_validate(self, port_id, channel_id)
+            .map_err(|e| ChannelError::AppModule {
+                description: e.to_string(),
+            })
     }
 
     fn on_chan_close_init_validate(
@@ -118,10 +116,11 @@ impl Module for TransferModule {
         port_id: &PortId,
         channel_id: &ChannelId,
     ) -> Result<(), ChannelError> {
-        ibc::applications::transfer::context::on_chan_close_init_validate(self, port_id, channel_id)
-            .map_err(|e| ChannelError::AppModule {
+        ibc::apps::transfer::module::on_chan_close_init_validate(self, port_id, channel_id).map_err(
+            |e| ChannelError::AppModule {
                 description: e.to_string(),
-            })
+            },
+        )
     }
 
     fn on_chan_close_confirm_validate(
@@ -129,12 +128,10 @@ impl Module for TransferModule {
         port_id: &PortId,
         channel_id: &ChannelId,
     ) -> Result<(), ChannelError> {
-        ibc::applications::transfer::context::on_chan_close_confirm_validate(
-            self, port_id, channel_id,
-        )
-        .map_err(|e| ChannelError::AppModule {
-            description: e.to_string(),
-        })
+        ibc::apps::transfer::module::on_chan_close_confirm_validate(self, port_id, channel_id)
+            .map_err(|e| ChannelError::AppModule {
+                description: e.to_string(),
+            })
     }
 
     fn on_recv_packet_execute(
@@ -157,7 +154,7 @@ impl Module for TransferModule {
             ..packet.clone()
         };
         let (extras, ack) =
-            ibc::applications::transfer::context::on_recv_packet_execute(self, &maybe_ft_packet);
+            ibc::apps::transfer::module::on_recv_packet_execute(self, &maybe_ft_packet);
         let ack_status =
             String::from_utf8(ack.as_bytes().to_vec()).expect("Invalid acknowledgement string");
         log!("Packet acknowledgement: {}", ack_status);
@@ -170,7 +167,7 @@ impl Module for TransferModule {
         acknowledgement: &Acknowledgement,
         relayer: &Signer,
     ) -> Result<(), PacketError> {
-        ibc::applications::transfer::context::on_acknowledgement_packet_validate(
+        ibc::apps::transfer::module::on_acknowledgement_packet_validate(
             self,
             packet,
             acknowledgement,
@@ -186,10 +183,11 @@ impl Module for TransferModule {
         packet: &Packet,
         relayer: &Signer,
     ) -> Result<(), PacketError> {
-        ibc::applications::transfer::context::on_timeout_packet_validate(self, packet, relayer)
-            .map_err(|e| PacketError::AppModule {
+        ibc::apps::transfer::module::on_timeout_packet_validate(self, packet, relayer).map_err(
+            |e| PacketError::AppModule {
                 description: e.to_string(),
-            })
+            },
+        )
     }
 
     fn on_chan_open_init_execute(
@@ -201,7 +199,7 @@ impl Module for TransferModule {
         counterparty: &Counterparty,
         version: &Version,
     ) -> Result<(ModuleExtras, Version), ChannelError> {
-        ibc::applications::transfer::context::on_chan_open_init_execute(
+        ibc::apps::transfer::module::on_chan_open_init_execute(
             self,
             order,
             connection_hops,
@@ -224,7 +222,7 @@ impl Module for TransferModule {
         counterparty: &Counterparty,
         counterparty_version: &Version,
     ) -> Result<(ModuleExtras, Version), ChannelError> {
-        ibc::applications::transfer::context::on_chan_open_try_execute(
+        ibc::apps::transfer::module::on_chan_open_try_execute(
             self,
             order,
             connection_hops,
@@ -244,7 +242,7 @@ impl Module for TransferModule {
         acknowledgement: &Acknowledgement,
         relayer: &Signer,
     ) -> (ModuleExtras, Result<(), PacketError>) {
-        let result = ibc::applications::transfer::context::on_acknowledgement_packet_execute(
+        let result = ibc::apps::transfer::module::on_acknowledgement_packet_execute(
             self,
             packet,
             acknowledgement,
@@ -263,8 +261,7 @@ impl Module for TransferModule {
         packet: &Packet,
         relayer: &Signer,
     ) -> (ModuleExtras, Result<(), PacketError>) {
-        let result =
-            ibc::applications::transfer::context::on_timeout_packet_execute(self, packet, relayer);
+        let result = ibc::apps::transfer::module::on_timeout_packet_execute(self, packet, relayer);
         (
             result.0,
             result.1.map_err(|e| PacketError::AppModule {

@@ -1,13 +1,15 @@
 use crate::prelude::*;
 use crate::NearIbcContract;
-use ibc::core::ics24_host::identifier::PortId;
-use ibc::core::router::{Module, ModuleId, Router};
+use ibc::core::{
+    host::types::identifiers::PortId,
+    router::{module::Module, router::Router, types::module::ModuleId},
+};
 
 impl Router for NearIbcContract {
     //
     fn get_route(&self, module_id: &ModuleId) -> Option<&dyn Module> {
         match module_id.to_string().as_str() {
-            ibc::applications::transfer::MODULE_ID_STR => Some(&self.module_holder.transfer_module),
+            ibc::apps::transfer::types::MODULE_ID_STR => Some(&self.module_holder.transfer_module),
             octopus_lpos::MODULE_ID_STR => Some(&self.module_holder.octopus_lpos_module),
             _ => None,
         }
@@ -15,7 +17,7 @@ impl Router for NearIbcContract {
     //
     fn get_route_mut(&mut self, module_id: &ModuleId) -> Option<&mut dyn Module> {
         match module_id.to_string().as_str() {
-            ibc::applications::transfer::MODULE_ID_STR => {
+            ibc::apps::transfer::types::MODULE_ID_STR => {
                 Some(&mut self.module_holder.transfer_module)
             }
             octopus_lpos::MODULE_ID_STR => Some(&mut self.module_holder.octopus_lpos_module),

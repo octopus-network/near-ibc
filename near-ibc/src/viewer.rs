@@ -4,24 +4,26 @@ use crate::{
     types::{Qualified, QueryHeight, QueryPacketEventDataRequest},
 };
 use ibc::{
+    clients::tendermint::context::CommonContext,
     core::{
-        events::IbcEvent,
-        ics03_connection::connection::{ConnectionEnd, IdentifiedConnectionEnd},
-        ics04_channel::{
+        channel::types::{
             channel::{ChannelEnd, IdentifiedChannelEnd},
             commitment::{AcknowledgementCommitment, PacketCommitment},
-            packet::Sequence,
         },
-        ics24_host::{
-            identifier::{ChannelId, ClientId, ConnectionId, PortId},
-            path::{
-                AckPath, ChannelEndPath, ClientConnectionPath, ClientConsensusStatePath,
-                ClientStatePath, CommitmentPath, ReceiptPath, SeqRecvPath,
+        client::types::Height,
+        connection::types::{ConnectionEnd, IdentifiedConnectionEnd},
+        handler::types::events::IbcEvent,
+        host::{
+            types::{
+                identifiers::{ChannelId, ClientId, ConnectionId, PortId, Sequence},
+                path::{
+                    AckPath, ChannelEndPath, ClientConnectionPath, ClientConsensusStatePath,
+                    ClientStatePath, CommitmentPath, ReceiptPath, SeqRecvPath,
+                },
             },
+            ValidationContext,
         },
-        ValidationContext,
     },
-    Height,
 };
 use itertools::Itertools;
 use near_sdk::{
@@ -155,25 +157,18 @@ impl Viewer for NearIbcContract {
     fn get_client_consensus_heights(&self, client_id: ClientId) -> Vec<Height> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
-            .client_consensus_state_height_sets
-            .get(&client_id)
-            .map_or_else(
-                || Vec::new(),
-                |heights| {
-                    heights
-                        .keys()
-                        .iter()
-                        .filter(|height| height.is_some())
-                        .map(|height| height.unwrap().clone())
-                        .collect()
-                },
-            )
+            .consensus_state_heights(&client_id)
+            .unwrap_or(Vec::new())
     }
 
     fn get_client_consensus(&self, client_id: ClientId, consensus_height: Height) -> Vec<u8> {
-        let consensus_state_key = ClientConsensusStatePath::new(&client_id, &consensus_height)
-            .to_string()
-            .into_bytes();
+        let consensus_state_key = ClientConsensusStatePath::new(
+            client_id,
+            consensus_height.revision_number(),
+            consensus_height.revision_height(),
+        )
+        .to_string()
+        .into_bytes();
         env::storage_read(&consensus_state_key).unwrap_or(vec![])
     }
 

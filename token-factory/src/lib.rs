@@ -6,7 +6,7 @@ use near_sdk::{
     near_bindgen,
     serde::{Deserialize, Serialize},
     store::UnorderedMap,
-    AccountId, BorshStorageKey, PanicOnDefault, Promise,
+    AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise,
 };
 use utils::{
     interfaces::{ext_wrapped_token, TokenFactory},
@@ -74,10 +74,10 @@ impl TokenFactory for Contract {
         };
         self.assert_asset_not_registered(&cross_chain_asset);
         let minimum_deposit = utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT
-            + env::storage_byte_cost()
+            + env::storage_byte_cost().as_yoctonear()
                 * (32 + borsh::to_vec(&cross_chain_asset).unwrap().len()) as u128;
         assert!(
-            env::attached_deposit() >= minimum_deposit,
+            env::attached_deposit().as_yoctonear() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
             minimum_deposit
         );
@@ -123,14 +123,16 @@ impl TokenFactory for Contract {
             near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_FUNCTION");
         Promise::new(token_contract_id)
             .create_account()
-            .transfer(utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT)
+            .transfer(NearToken::from_yoctonear(
+                utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT,
+            ))
             .deploy_contract(
                 env::storage_read(&borsh::to_vec(&StorageKey::TokenContractWasm).unwrap()).unwrap(),
             )
             .function_call(
                 "new".to_string(),
                 args,
-                0,
+                NearToken::from_yoctonear(0),
                 utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
             );
         ExtraDepositCost::add(utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT);
@@ -208,11 +210,11 @@ pub extern "C" fn store_wasm_of_token_contract() {
     let blob_len = input.len();
     if blob_len > current_len {
         let storage_cost = (env::storage_usage() + blob_len as u64 - current_len as u64) as u128
-            * env::storage_byte_cost();
+            * env::storage_byte_cost().as_yoctonear();
         assert!(
-            env::account_balance() >= storage_cost,
+            env::account_balance().as_yoctonear() >= storage_cost,
             "ERR_NOT_ENOUGH_ACCOUNT_BALANCE, needs {} more.",
-            storage_cost - env::account_balance()
+            storage_cost - env::account_balance().as_yoctonear()
         );
     }
 

@@ -14,7 +14,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use ibc::core::ics24_host::identifier::ChannelId;
+use ibc::core::host::types::identifiers::ChannelId;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env,
@@ -22,7 +22,7 @@ use near_sdk::{
     near_bindgen,
     serde::{Deserialize, Serialize},
     store::UnorderedSet,
-    AccountId, BorshStorageKey, PanicOnDefault, Promise,
+    AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise,
 };
 use utils::{interfaces::EscrowFactory, ExtraDepositCost};
 
@@ -80,7 +80,9 @@ impl EscrowFactory for Contract {
                 .expect("ERR_SERIALIZE_ARGS_FOR_ESCROW_CONTRACT_INIT");
             Promise::new(escrow_contract_id)
                 .create_account()
-                .transfer(utils::INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT)
+                .transfer(NearToken::from_yoctonear(
+                    utils::INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT,
+                ))
                 .deploy_contract(
                     env::storage_read(&borsh::to_vec(&StorageKey::EscrowContractWasm).unwrap())
                         .unwrap(),
@@ -88,7 +90,7 @@ impl EscrowFactory for Contract {
                 .function_call(
                     "new".to_string(),
                     args,
-                    0,
+                    NearToken::from_yoctonear(0),
                     utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
                 );
             ExtraDepositCost::add(utils::INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT);
@@ -130,11 +132,11 @@ pub extern "C" fn store_wasm_of_channel_escrow() {
     let blob_len = input.len();
     if blob_len > current_len {
         let storage_cost = (env::storage_usage() + blob_len as u64 - current_len as u64) as u128
-            * env::storage_byte_cost();
+            * env::storage_byte_cost().as_yoctonear();
         assert!(
-            env::account_balance() >= storage_cost,
+            env::account_balance().as_yoctonear() >= storage_cost,
             "ERR_NOT_ENOUGH_ACCOUNT_BALANCE, needs {} more.",
-            storage_cost - env::account_balance()
+            storage_cost - env::account_balance().as_yoctonear()
         );
     }
 

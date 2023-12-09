@@ -1,10 +1,7 @@
 use crate::prelude::*;
-use ibc::{
-    core::{
-        ics04_channel::packet::Sequence,
-        ics24_host::identifier::{ChannelId, PortId},
-    },
-    Height,
+use ibc::core::{
+    client::types::Height,
+    host::types::identifiers::{ChannelId, PortId, Sequence},
 };
 use near_sdk::{
     json_types::U64,

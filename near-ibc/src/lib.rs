@@ -14,17 +14,17 @@ extern crate std;
 use crate::{context::NearIbcStore, ibc_impl::applications::transfer::TransferModule, prelude::*};
 use core::str::FromStr;
 use ibc::{
-    applications::transfer::{
+    apps::transfer::types::{
         msgs::transfer::MsgTransfer, packet::PacketData, Amount, BaseDenom, Memo, PrefixedCoin,
         PrefixedDenom, TracePath,
     },
     core::{
-        ics04_channel::timeout::TimeoutHeight,
-        ics24_host::identifier::{ChannelId, ClientId, ConnectionId, PortId},
-        timestamp::Timestamp,
-        MsgEnvelope,
+        channel::types::timeout::TimeoutHeight,
+        client::types::Height,
+        handler::types::msgs::MsgEnvelope,
+        host::types::identifiers::{ChannelId, ClientId, ConnectionId, PortId},
+        primitives::{Signer, Timestamp},
     },
-    Height, Signer,
 };
 use ibc_proto::google::protobuf::Any;
 use module_holder::ModuleHolder;
@@ -38,7 +38,7 @@ use near_sdk::{
     serde::{Deserialize, Serialize},
     serde_json,
     store::LookupMap,
-    AccountId, BorshStorageKey, PanicOnDefault,
+    AccountId, BorshStorageKey, NearToken, PanicOnDefault,
 };
 use octopus_lpos::msgs::MsgValidatorSetChange;
 use types::*;
@@ -51,7 +51,7 @@ use utils::{
     ExtraDepositCost,
 };
 
-mod collections;
+pub mod collections;
 mod context;
 mod events;
 mod ext_interfaces;
@@ -63,7 +63,7 @@ mod testnet_functions;
 pub mod types;
 pub mod viewer;
 
-pub const VERSION: &str = "v1.2.0-pre.0";
+pub const VERSION: &str = "v1.0.0";
 /// The default timeout seconds for the `MsgTransfer` message.
 pub const DEFAULT_TIMEOUT_SECONDS: u64 = 1000;
 
@@ -78,17 +78,11 @@ pub enum StorageKey {
         client_id: ClientId,
     },
     ClientProcessedTimes,
-    ClientProcessedTimesIndex {
-        client_id: ClientId,
-    },
-    ClientProcessedTimesKey {
+    ClientProcessedTimesMap {
         client_id: ClientId,
     },
     ClientProcessedHeights,
-    ClientProcessedHeightsIndex {
-        client_id: ClientId,
-    },
-    ClientProcessedHeightsKey {
+    ClientProcessedHeightsMap {
         client_id: ClientId,
     },
     ConnectionIdSet,
@@ -139,7 +133,7 @@ impl NearIbcContract {
     #[payable]
     pub fn deliver(&mut self, messages: Vec<Any>) {
         assert!(
-            env::attached_deposit()
+            env::attached_deposit().as_yoctonear()
                 >= utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG * messages.len() as u128,
             "Need to attach at least {} yocto NEAR to cover the possible storage cost.",
             utils::MINIMUM_DEPOSIT_FOR_DELEVER_MSG * messages.len() as u128
@@ -149,23 +143,27 @@ impl NearIbcContract {
         // Deliver messages to `ibc-rs`
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
 
-        let errors = messages.into_iter().fold(vec![], |mut errors, msg| {
-            match MsgEnvelope::try_from(msg.clone()) {
-                Ok(msg) => match ibc::core::dispatch(&mut near_ibc_store, self, msg.clone()) {
+        let mut errors_count = 0;
+        messages
+            .into_iter()
+            .for_each(|msg| match MsgEnvelope::try_from(msg.clone()) {
+                Ok(msg) => match ibc::core::handler::entrypoint::dispatch(
+                    &mut near_ibc_store,
+                    self,
+                    msg.clone(),
+                ) {
                     Ok(()) => (),
                     Err(e) => {
                         log!("Error occurred in processing message: {:?}, {:?}", msg, e);
-                        errors.push(e)
+                        errors_count += 1;
                     }
                 },
                 Err(e) => {
                     log!("Error occurred in routing message: {:?}, {:?}", msg, e);
-                    errors.push(e)
+                    errors_count += 1;
                 }
-            }
-            errors
-        });
-        if errors.len() > 0 {
+            });
+        if errors_count > 0 {
             log!(
                 r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0","event":"ERR_DELIVER_MESSAGE"}}"#,
             );
@@ -208,17 +206,17 @@ impl NearIbcContract {
             metadata: metadata.clone(),
         };
         let minimum_deposit = utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT
-            + env::storage_byte_cost()
+            + env::storage_byte_cost().as_yoctonear()
                 * (32 + borsh::to_vec(&cross_chain_asset).unwrap().len()) as u128;
         assert!(
-            env::attached_deposit() >= minimum_deposit,
+            env::attached_deposit().as_yoctonear() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
             minimum_deposit
         );
         let used_bytes = env::storage_usage();
         ExtraDepositCost::reset();
         ext_token_factory::ext(utils::get_token_factory_contract_id())
-            .with_attached_deposit(minimum_deposit)
+            .with_attached_deposit(NearToken::from_yoctonear(minimum_deposit))
             .with_static_gas(
                 utils::GAS_FOR_COMPLEX_FUNCTION_CALL
                     .checked_sub(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
@@ -250,16 +248,17 @@ impl NearIbcContract {
             "ERR_NOT_ENOUGH_GAS"
         );
         let minimum_deposit = utils::INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT
-            + env::storage_byte_cost() * (borsh::to_vec(&channel_id).unwrap().len() + 16) as u128;
+            + env::storage_byte_cost().as_yoctonear()
+                * (borsh::to_vec(&channel_id).unwrap().len() + 16) as u128;
         assert!(
-            env::attached_deposit() >= minimum_deposit,
+            env::attached_deposit().as_yoctonear() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
             minimum_deposit
         );
         let used_bytes = env::storage_usage();
         ExtraDepositCost::reset();
         ext_escrow_factory::ext(utils::get_escrow_factory_contract_id())
-            .with_attached_deposit(minimum_deposit)
+            .with_attached_deposit(NearToken::from_yoctonear(minimum_deposit))
             .with_static_gas(
                 utils::GAS_FOR_COMPLEX_FUNCTION_CALL
                     .checked_sub(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
@@ -293,11 +292,11 @@ impl NearIbcContract {
             trace_path: String::new(),
             base_denom,
         };
-        let minimum_deposit = env::storage_byte_cost()
+        let minimum_deposit = env::storage_byte_cost().as_yoctonear()
             * (borsh::to_vec(&asset_denom).unwrap().len() + token_contract.to_string().len())
                 as u128;
         assert!(
-            env::attached_deposit() >= minimum_deposit,
+            env::attached_deposit().as_yoctonear() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
             minimum_deposit
         );
@@ -306,7 +305,7 @@ impl NearIbcContract {
         let escrow_account_id =
             format!("{}.{}", channel_id, utils::get_escrow_factory_contract_id());
         ext_channel_escrow::ext(AccountId::from_str(escrow_account_id.as_str()).unwrap())
-            .with_attached_deposit(minimum_deposit)
+            .with_attached_deposit(NearToken::from_yoctonear(minimum_deposit))
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
             .with_unused_gas_weight(0)
             .register_asset(asset_denom.base_denom, token_contract);
