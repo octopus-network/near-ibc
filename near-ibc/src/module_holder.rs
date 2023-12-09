@@ -2,7 +2,7 @@ use crate::{
     ibc_impl::applications::{octopus_lpos::OctopusLposModule, transfer::TransferModule},
     prelude::*,
 };
-use ibc::core::{ics24_host::identifier::PortId, router::ModuleId};
+use ibc::core::{host::types::identifiers::PortId, router::types::module::ModuleId};
 use near_sdk::{
     borsh::{BorshDeserialize, BorshSerialize},
     AccountId,
@@ -26,8 +26,8 @@ impl ModuleHolder {
     ///
     pub fn get_module_id(&self, port_id: &PortId) -> Option<ModuleId> {
         match port_id.as_str() {
-            ibc::applications::transfer::PORT_ID_STR => Some(ModuleId::new(
-                ibc::applications::transfer::MODULE_ID_STR.to_string(),
+            ibc::apps::transfer::types::PORT_ID_STR => Some(ModuleId::new(
+                ibc::apps::transfer::types::MODULE_ID_STR.to_string(),
             )),
             octopus_lpos::PORT_ID_STR => {
                 Some(ModuleId::new(octopus_lpos::MODULE_ID_STR.to_string()))

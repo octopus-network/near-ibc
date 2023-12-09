@@ -1,15 +1,15 @@
 use crate::prelude::*;
 use ibc::{
-    clients::ics07_tendermint::consensus_state::ConsensusState as TmConsensusState,
+    clients::tendermint::consensus_state::ConsensusState as TmConsensusState,
     core::{
-        ics02_client::{consensus_state::ConsensusState, error::ClientError},
-        ics23_commitment::commitment::CommitmentRoot,
-        timestamp::Timestamp,
+        client::{context::consensus_state::ConsensusState, types::error::ClientError},
+        commitment_types::commitment::CommitmentRoot,
     },
+    primitives::Timestamp,
 };
 use ibc_proto::{
     google::protobuf::Any,
-    ibc::lightclients::tendermint::v1::ConsensusState as RawTmConsensusState, protobuf::Protobuf,
+    ibc::lightclients::tendermint::v1::ConsensusState as RawTmConsensusState, Protobuf,
 };
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +47,7 @@ impl From<AnyConsensusState> for Any {
         match value {
             AnyConsensusState::Tendermint(value) => Any {
                 type_url: TENDERMINT_CONSENSUS_STATE_TYPE_URL.to_string(),
-                value: Protobuf::<RawTmConsensusState>::encode_vec(&value),
+                value: Protobuf::<RawTmConsensusState>::encode_vec(value),
             },
         }
     }
@@ -68,27 +68,25 @@ impl ConsensusState for AnyConsensusState {
 
     fn timestamp(&self) -> Timestamp {
         match self {
-            AnyConsensusState::Tendermint(value) => value.timestamp(),
+            AnyConsensusState::Tendermint(value) => value.timestamp().into(),
         }
     }
 
-    fn encode_vec(&self) -> Vec<u8> {
+    fn encode_vec(self) -> Vec<u8> {
         match self {
             AnyConsensusState::Tendermint(value) => {
-                ibc::core::ics02_client::consensus_state::ConsensusState::encode_vec(value)
+                ibc::core::client::context::consensus_state::ConsensusState::encode_vec(value)
             }
         }
     }
 }
 
-impl TryInto<ibc::clients::ics07_tendermint::consensus_state::ConsensusState>
-    for AnyConsensusState
-{
+impl TryInto<ibc::clients::tendermint::consensus_state::ConsensusState> for AnyConsensusState {
     type Error = ClientError;
 
     fn try_into(
         self,
-    ) -> Result<ibc::clients::ics07_tendermint::consensus_state::ConsensusState, Self::Error> {
+    ) -> Result<ibc::clients::tendermint::consensus_state::ConsensusState, Self::Error> {
         match self {
             AnyConsensusState::Tendermint(value) => Ok(value),
         }

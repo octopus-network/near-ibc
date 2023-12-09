@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use ibc::core::events::IbcEvent;
+use ibc::core::handler::types::events::IbcEvent;
 use near_sdk::serde::Serialize;
 use near_sdk::serde_json::{json, Value};
 use near_sdk::{env, log};

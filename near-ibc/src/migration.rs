@@ -1,11 +1,14 @@
 use crate::{
-    collections::{IndexedAscendingLookupQueue, IndexedAscendingSimpleQueue},
+    collections::IndexedAscendingLookupQueue,
     context::{HostHeight, NearTimeStamp},
     module_holder::ModuleHolder,
     *,
 };
-use ibc::core::{events::IbcEvent, ics04_channel::packet::Sequence};
-use near_sdk::{borsh, store::UnorderedSet};
+use ibc::core::{handler::types::events::IbcEvent, host::types::identifiers::Sequence};
+use near_sdk::{
+    borsh,
+    store::{UnorderedMap, UnorderedSet},
+};
 
 pub trait StorageMigration {
     fn migrate_state() -> Self;
@@ -17,14 +20,11 @@ pub struct OldNearIbcStore {
     /// The client ids of the clients.
     pub client_id_set: UnorderedSet<ClientId>,
     pub client_counter: u64,
-    pub client_processed_times:
-        LookupMap<ClientId, IndexedAscendingLookupQueue<Height, NearTimeStamp>>,
-    pub client_processed_heights:
-        LookupMap<ClientId, IndexedAscendingLookupQueue<Height, HostHeight>>,
+    pub client_processed_times: LookupMap<ClientId, UnorderedMap<Height, NearTimeStamp>>,
+    pub client_processed_heights: LookupMap<ClientId, UnorderedMap<Height, HostHeight>>,
     /// This collection contains the heights corresponding to all consensus states of
     /// all clients stored in the contract.
-    pub client_consensus_state_height_sets:
-        LookupMap<ClientId, IndexedAscendingSimpleQueue<Height>>,
+    pub client_consensus_state_height_sets: LookupMap<ClientId, UnorderedSet<Height>>,
     /// The connection ids of the connections.
     pub connection_id_set: UnorderedSet<ConnectionId>,
     pub connection_counter: u64,

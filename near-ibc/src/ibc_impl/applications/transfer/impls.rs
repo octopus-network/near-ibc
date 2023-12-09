@@ -2,14 +2,13 @@ use super::{AccountIdConversion, TransferModule};
 use crate::prelude::*;
 use core::str::FromStr;
 use ibc::{
-    applications::transfer::{
+    apps::transfer::{
         context::{TokenTransferExecutionContext, TokenTransferValidationContext},
-        error::TokenTransferError,
-        PrefixedCoin,
+        types::{error::TokenTransferError, PrefixedCoin},
     },
-    core::ics24_host::identifier::{ChannelId, PortId},
+    core::host::types::identifiers::{ChannelId, PortId},
 };
-use near_sdk::{env, json_types::U128, log};
+use near_sdk::{env, json_types::U128, log, NearToken};
 use utils::{
     interfaces::{ext_channel_escrow, ext_process_transfer_request_callback, ext_token_factory},
     ExtraDepositCost,
@@ -29,7 +28,7 @@ impl TokenTransferExecutionContext for TransferModule {
         let prefixed_ef = format!(".ef.transfer.{}", env::current_account_id());
         if receiver_id.ends_with(prefixed_ef.as_str()) {
             ext_process_transfer_request_callback::ext(to.0.clone())
-                .with_attached_deposit(0)
+                .with_attached_deposit(NearToken::from_yoctonear(0))
                 .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
                 .with_unused_gas_weight(0)
                 .apply_transfer_request(
@@ -40,7 +39,7 @@ impl TokenTransferExecutionContext for TransferModule {
                 );
         } else if sender_id.ends_with(prefixed_ef.as_str()) {
             ext_channel_escrow::ext(from.0.clone())
-                .with_attached_deposit(1)
+                .with_attached_deposit(NearToken::from_yoctonear(1))
                 .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(4))
                 .with_unused_gas_weight(0)
                 .do_transfer(
@@ -68,7 +67,9 @@ impl TokenTransferExecutionContext for TransferModule {
             amt.denom.base_denom
         );
         ext_token_factory::ext(utils::get_token_factory_contract_id())
-            .with_attached_deposit(utils::STORAGE_DEPOSIT_FOR_MINT_TOKEN)
+            .with_attached_deposit(NearToken::from_yoctonear(
+                utils::STORAGE_DEPOSIT_FOR_MINT_TOKEN,
+            ))
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(8))
             .with_unused_gas_weight(0)
             .mint_asset(
@@ -93,7 +94,7 @@ impl TokenTransferExecutionContext for TransferModule {
             amt.denom.base_denom
         );
         ext_process_transfer_request_callback::ext(env::predecessor_account_id())
-            .with_attached_deposit(0)
+            .with_attached_deposit(NearToken::from_yoctonear(0))
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
             .with_unused_gas_weight(0)
             .apply_transfer_request(

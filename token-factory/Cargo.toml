@@ -7,9 +7,7 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# near-sdk = "4.1.0"
-near-sdk = { git = "https://github.com/near/near-sdk-rs", branch = "master" }
-# near-contract-standards = "4.1.0"
-near-contract-standards = { git = "https://github.com/near/near-sdk-rs", branch = "master" }
-hex = "0.4"
+near-sdk = { workspace = true }
+near-contract-standards = { workspace = true }
+hex = { workspace = true }
 utils = { path = "../utils" }

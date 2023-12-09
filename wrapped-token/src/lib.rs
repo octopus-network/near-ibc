@@ -9,13 +9,12 @@
 
 extern crate alloc;
 
-use core::str::FromStr;
-
 use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use ibc::applications::transfer::TracePath;
+use core::str::FromStr;
+use ibc::apps::transfer::types::TracePath;
 use near_contract_standards::{
     fungible_token::{
         events::{FtBurn, FtMint},
@@ -31,7 +30,7 @@ use near_sdk::{
     json_types::{U128, U64},
     near_bindgen,
     store::UnorderedMap,
-    AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseOrValue,
+    AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise, PromiseOrValue,
 };
 use utils::{
     interfaces::{
@@ -152,7 +151,7 @@ impl Contract {
             timeout_seconds,
         };
         ext_transfer_request_handler::ext(self.near_ibc_account.clone())
-            .with_attached_deposit(0)
+            .with_attached_deposit(NearToken::from_yoctonear(0))
             .with_static_gas(utils::GAS_FOR_COMPLEX_FUNCTION_CALL)
             .with_unused_gas_weight(0)
             .process_transfer_request(transfer_request.clone());
@@ -166,13 +165,13 @@ impl Contract {
         // Generate events.
         FtBurn {
             owner_id: &sender_id,
-            amount: &amount,
+            amount,
             memo: None,
         }
         .emit();
         FtMint {
             owner_id: &env::current_account_id(),
-            amount: &amount,
+            amount,
             memo: None,
         }
         .emit();
@@ -186,17 +185,17 @@ impl Contract {
         amount: U128,
     ) {
         assert!(
-            self.pending_transfer_requests.contains_key(&account_id),
+            self.pending_transfer_requests.contains_key(account_id),
             "ERR_NO_PENDING_TRANSFER_REQUEST"
         );
-        let req = self.pending_transfer_requests.get(&account_id).unwrap();
+        let req = self.pending_transfer_requests.get(account_id).unwrap();
         assert!(
             req.amount == amount
                 && req.token_denom.eq(base_denom)
                 && req.token_trace_path.eq(trace_path),
             "ERR_PENDING_TRANSFER_REQUEST_NOT_MATCHED"
         );
-        self.pending_transfer_requests.remove(&account_id);
+        self.pending_transfer_requests.remove(account_id);
     }
     ///
     pub fn get_pending_accounts(&self) -> Vec<AccountId> {
@@ -264,7 +263,7 @@ impl StorageManagement for Contract {
         self.token.storage_deposit(account_id, registration_only)
     }
 
-    fn storage_withdraw(&mut self, amount: Option<U128>) -> StorageBalance {
+    fn storage_withdraw(&mut self, amount: Option<NearToken>) -> StorageBalance {
         self.token.storage_withdraw(amount)
     }
 
@@ -292,7 +291,7 @@ impl WrappedToken for Contract {
         utils::refund_deposit(used_bytes);
         FtMint {
             owner_id: &account_id,
-            amount: &amount,
+            amount,
             memo: None,
         }
         .emit();
@@ -302,8 +301,9 @@ impl WrappedToken for Contract {
     fn set_icon(&mut self, icon: String) {
         utils::assert_parent_account();
         assert!(
-            env::attached_deposit()
-                >= env::storage_byte_cost() * icon.clone().into_bytes().len() as u128,
+            env::attached_deposit().as_yoctonear()
+                >= env::storage_byte_cost().as_yoctonear()
+                    * icon.clone().into_bytes().len() as u128,
             "ERR_NOT_ENOUGH_DEPOSIT"
         );
         let used_bytes = env::storage_usage();
@@ -330,7 +330,7 @@ impl ProcessTransferRequestCallback for Contract {
             .internal_withdraw(&env::current_account_id(), amount.into());
         FtBurn {
             owner_id: &env::current_account_id(),
-            amount: &amount,
+            amount,
             memo: None,
         }
         .emit()
@@ -350,13 +350,13 @@ impl ProcessTransferRequestCallback for Contract {
         self.token.internal_deposit(&sender_id, amount.into());
         FtBurn {
             owner_id: &env::current_account_id(),
-            amount: &amount,
+            amount,
             memo: None,
         }
         .emit();
         FtMint {
             owner_id: &sender_id,
-            amount: &amount,
+            amount,
             memo: None,
         }
         .emit();

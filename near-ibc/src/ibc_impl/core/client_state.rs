@@ -1,30 +1,29 @@
 use super::consensus_state::AnyConsensusState;
 use crate::context::NearEd25519Verifier;
-use crate::{collections::IndexedAscendingQueueViewer, context::NearIbcStore, prelude::*};
-use ibc::core::ics02_client::client_state::Status;
+use crate::{context::NearIbcStore, prelude::*};
 use ibc::{
-    clients::ics07_tendermint::client_state::ClientState as TmClientState,
+    clients::tendermint::client_state::ClientState as TmClientState,
     core::{
-        ics02_client::{
-            client_state::{
-                ClientStateCommon, ClientStateExecution, ClientStateValidation, UpdateKind,
+        client::context::{
+            client_state::{ClientStateCommon, ClientStateExecution, ClientStateValidation},
+            types::{error::ClientError, Height, Status, UpdateKind},
+            ClientValidationContext,
+        },
+        commitment_types::commitment::{CommitmentPrefix, CommitmentProofBytes, CommitmentRoot},
+        handler::types::error::ContextError,
+        host::{
+            types::{
+                identifiers::{ClientId, ClientType},
+                path::{ClientConsensusStatePath, Path},
             },
-            client_type::ClientType,
-            error::ClientError,
+            ValidationContext,
         },
-        ics23_commitment::commitment::{CommitmentPrefix, CommitmentProofBytes, CommitmentRoot},
-        ics24_host::{
-            identifier::ClientId,
-            path::{ClientConsensusStatePath, Path},
-        },
-        timestamp::Timestamp,
-        ContextError, ValidationContext,
     },
-    Height,
+    primitives::Timestamp,
 };
 use ibc_proto::{
     google::protobuf::Any, ibc::lightclients::tendermint::v1::ClientState as RawTmClientState,
-    protobuf::Protobuf,
+    Protobuf,
 };
 use serde::{Deserialize, Serialize};
 
@@ -61,7 +60,7 @@ impl From<AnyClientState> for Any {
         match value {
             AnyClientState::Tendermint(client_state) => Any {
                 type_url: TENDERMINT_CLIENT_STATE_TYPE_URL.to_string(),
-                value: Protobuf::<RawTmClientState>::encode_vec(&client_state),
+                value: Protobuf::<RawTmClientState>::encode_vec(client_state),
             },
         }
     }
@@ -248,7 +247,7 @@ impl ClientStateExecution<NearIbcStore> for AnyClientState {
     }
 }
 
-impl ibc::clients::ics07_tendermint::CommonContext for NearIbcStore {
+impl ibc::clients::tendermint::context::CommonContext for NearIbcStore {
     type ConversionError = ClientError;
 
     type AnyConsensusState = AnyConsensusState;
@@ -259,25 +258,45 @@ impl ibc::clients::ics07_tendermint::CommonContext for NearIbcStore {
     ) -> Result<Self::AnyConsensusState, ContextError> {
         ValidationContext::consensus_state(self, client_cons_state_path)
     }
-}
 
-impl ibc::clients::ics07_tendermint::ValidationContext for NearIbcStore {
+    fn consensus_state_heights(&self, client_id: &ClientId) -> Result<Vec<Height>, ContextError> {
+        Ok(self
+            .client_consensus_state_height_sets
+            .get(&client_id)
+            .map_or_else(
+                || Vec::new(),
+                |heights| heights.iter().map(|height| height.clone()).collect(),
+            ))
+    }
+
+    fn host_height(&self) -> Result<Height, ContextError> {
+        ValidationContext::host_height(self)
+    }
+
     fn host_timestamp(&self) -> Result<Timestamp, ContextError> {
         ValidationContext::host_timestamp(self)
     }
+}
 
+impl ibc::clients::tendermint::context::ValidationContext for NearIbcStore {
     fn next_consensus_state(
         &self,
         client_id: &ClientId,
         height: &Height,
     ) -> Result<Option<Self::AnyConsensusState>, ContextError> {
         if let Some(consensus_state_keys) = self.client_consensus_state_height_sets.get(client_id) {
-            consensus_state_keys
-                .get_next_key_by_key(height)
-                .map(|next_height| {
-                    self.consensus_state(&ClientConsensusStatePath::new(client_id, next_height))
-                })
-                .map_or_else(|| Ok(None), |cs| Ok(Some(cs.unwrap())))
+            get_next_height(
+                height,
+                consensus_state_keys.iter().map(|h| h.clone()).collect(),
+            )
+            .map(|next_height| {
+                self.consensus_state(&ClientConsensusStatePath::new(
+                    client_id.clone(),
+                    next_height.revision_number(),
+                    next_height.revision_height(),
+                ))
+            })
+            .map_or_else(|| Ok(None), |cs| Ok(Some(cs.unwrap())))
         } else {
             Err(ContextError::ClientError(
                 ClientError::MissingRawConsensusState,
@@ -291,16 +310,106 @@ impl ibc::clients::ics07_tendermint::ValidationContext for NearIbcStore {
         height: &Height,
     ) -> Result<Option<Self::AnyConsensusState>, ContextError> {
         if let Some(consensus_state_keys) = self.client_consensus_state_height_sets.get(client_id) {
-            consensus_state_keys
-                .get_previous_key_by_key(height)
-                .map(|next_height| {
-                    self.consensus_state(&ClientConsensusStatePath::new(client_id, next_height))
-                })
-                .map_or_else(|| Ok(None), |cs| Ok(Some(cs.unwrap())))
+            get_previous_height(
+                height,
+                consensus_state_keys.iter().map(|h| h.clone()).collect(),
+            )
+            .map(|next_height| {
+                self.consensus_state(&ClientConsensusStatePath::new(
+                    client_id.clone(),
+                    next_height.revision_number(),
+                    next_height.revision_height(),
+                ))
+            })
+            .map_or_else(|| Ok(None), |cs| Ok(Some(cs.unwrap())))
         } else {
             Err(ContextError::ClientError(
                 ClientError::MissingRawConsensusState,
             ))
         }
+    }
+}
+
+impl ClientValidationContext for NearIbcStore {
+    fn client_update_time(
+        &self,
+        client_id: &ClientId,
+        height: &Height,
+    ) -> Result<Timestamp, ContextError> {
+        self.client_processed_times
+            .get(client_id)
+            .and_then(|processed_times| processed_times.get(height))
+            .map(|ts| Timestamp::from_nanoseconds(*ts).unwrap())
+            .ok_or_else(|| {
+                ContextError::ClientError(ClientError::Other {
+                    description: format!(
+                        "Client update time not found. client_id: {}, height: {}",
+                        client_id, height
+                    ),
+                })
+            })
+    }
+
+    fn client_update_height(
+        &self,
+        client_id: &ClientId,
+        height: &Height,
+    ) -> Result<Height, ContextError> {
+        self.client_processed_heights
+            .get(client_id)
+            .and_then(|processed_heights| processed_heights.get(height))
+            .map(|height: &Height| height.clone())
+            .ok_or_else(|| {
+                ContextError::ClientError(ClientError::Other {
+                    description: format!(
+                        "Client update height not found. client_id: {}, height: {}",
+                        client_id, height
+                    ),
+                })
+            })
+    }
+}
+
+fn get_previous_height(height: &Height, heights: Vec<Height>) -> Option<Height> {
+    let mut heights = heights;
+    heights.sort();
+    heights.reverse();
+    heights
+        .iter()
+        .find(|h| **h < *height)
+        .and_then(|h| Some(h.clone()))
+}
+
+fn get_next_height(height: &Height, heights: Vec<Height>) -> Option<Height> {
+    let mut heights = heights;
+    heights.sort();
+    heights
+        .iter()
+        .find(|h| **h > *height)
+        .and_then(|h| Some(h.clone()))
+}
+
+#[cfg(test)]
+mod tests {
+    use ibc::core::client::types::Height;
+
+    #[test]
+    fn test_get_previous_next_height() {
+        let heights = vec![
+            Height::new(0, 6).unwrap(),
+            Height::new(0, 1).unwrap(),
+            Height::new(0, 2).unwrap(),
+            Height::new(0, 3).unwrap(),
+            Height::new(0, 4).unwrap(),
+            Height::new(0, 5).unwrap(),
+        ];
+        let height = Height::new(0, 3).unwrap();
+        assert!(
+            super::get_previous_height(&height, heights.clone()).unwrap()
+                == Height::new(0, 2).unwrap()
+        );
+        assert!(
+            super::get_next_height(&height, heights.clone()).unwrap() == Height::new(0, 4).unwrap()
+        );
     }
 }

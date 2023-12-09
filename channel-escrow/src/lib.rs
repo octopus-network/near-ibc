@@ -13,7 +13,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use ibc::applications::transfer::PORT_ID_STR;
+use ibc::apps::transfer::types::PORT_ID_STR;
 use near_contract_standards::fungible_token::core::ext_ft_core;
 use near_sdk::{
     borsh::{BorshDeserialize, BorshSerialize},
@@ -23,7 +23,7 @@ use near_sdk::{
     serde::{Deserialize, Serialize},
     serde_json,
     store::UnorderedMap,
-    AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseOrValue,
+    AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise, PromiseOrValue,
 };
 use utils::{
     interfaces::{
@@ -117,7 +117,7 @@ impl Contract {
             timeout_seconds: msg.timeout_seconds,
         };
         ext_transfer_request_handler::ext(self.near_ibc_account())
-            .with_attached_deposit(0)
+            .with_attached_deposit(NearToken::from_yoctonear(0))
             .with_static_gas(utils::GAS_FOR_COMPLEX_FUNCTION_CALL)
             .with_unused_gas_weight(0)
             .process_transfer_request(transfer_request.clone());
@@ -135,17 +135,17 @@ impl Contract {
         amount: U128,
     ) {
         assert!(
-            self.pending_transfer_requests.contains_key(&account_id),
+            self.pending_transfer_requests.contains_key(account_id),
             "ERR_NO_PENDING_TRANSFER_REQUEST"
         );
-        let req = self.pending_transfer_requests.get(&account_id).unwrap();
+        let req = self.pending_transfer_requests.get(account_id).unwrap();
         assert!(
             req.amount == amount
                 && req.token_denom.eq(base_denom)
                 && req.token_trace_path.eq(trace_path),
             "ERR_PENDING_TRANSFER_REQUEST_NOT_MATCHED"
         );
-        self.pending_transfer_requests.remove(&account_id);
+        self.pending_transfer_requests.remove(account_id);
     }
     // Get token contract account id corresponding to the asset denom.
     fn get_token_contract_by_asset_denom(&self, asset_denom: &AssetDenom) -> Option<AccountId> {
@@ -194,7 +194,7 @@ impl ChannelEscrow for Contract {
         near_sdk::assert_one_yocto();
         let token_contract = maybe_existed_token_contract.unwrap();
         ext_ft_core::ext(token_contract.clone())
-            .with_attached_deposit(1)
+            .with_attached_deposit(NearToken::from_yoctonear(1))
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(2))
             .with_unused_gas_weight(0)
             .ft_transfer(receiver_id, amount.into(), None);
@@ -253,7 +253,7 @@ impl ProcessTransferRequestCallback for Contract {
         );
         let token_contract = maybe_existed_token_contract.unwrap();
         ext_ft_core::ext(token_contract.clone())
-            .with_attached_deposit(1)
+            .with_attached_deposit(NearToken::from_yoctonear(1))
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(2))
             .with_unused_gas_weight(0)
             .ft_transfer(sender_id, amount.into(), None);
