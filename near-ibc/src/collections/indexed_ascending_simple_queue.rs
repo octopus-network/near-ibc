@@ -1,6 +1,6 @@
-use crate::{types::ProcessingResult, *};
-
 use super::IndexedAscendingQueueViewer;
+use crate::{types::ProcessingResult, *};
+use core::fmt::Debug;
 
 /// A simple implementation of `indexed ordered queue`.
 ///
@@ -18,7 +18,7 @@ use super::IndexedAscendingQueueViewer;
 #[borsh(crate = "near_sdk::borsh")]
 pub struct IndexedAscendingSimpleQueue<K>
 where
-    K: BorshDeserialize + BorshSerialize + Clone + Ord,
+    K: BorshDeserialize + BorshSerialize + Clone + Ord + Debug,
 {
     /// The map of index to K.
     index_map: LookupMap<u64, K>,
@@ -35,7 +35,7 @@ where
 /// Implement change functions for `IndexedLookupQueue`.
 impl<K> IndexedAscendingSimpleQueue<K>
 where
-    K: BorshDeserialize + BorshSerialize + Clone + Ord,
+    K: BorshDeserialize + BorshSerialize + Clone + Ord + Debug,
 {
     ///
     pub fn new(index_map_storage_key: StorageKey, max_length: u64) -> Self {
@@ -64,10 +64,15 @@ where
     }
     ///
     pub fn push_back(&mut self, key: K) {
-        assert!(
-            self.end_index == 0 || &key > self.get_key_by_index(&self.end_index).unwrap(),
-            "The key to be added should be larger than the latest key in the queue."
-        );
+        if !(self.end_index == 0 || &key > self.get_key_by_index(&self.end_index).unwrap()) {
+            log!(
+                "The key to be added should be larger than the latest key in the queue. \
+            Key: {:?}, Latest key: {:?}",
+                key,
+                self.get_key_by_index(&self.end_index).unwrap()
+            );
+        }
+
         self.index_map.insert(self.end_index + 1, key.clone());
         if self.start_index == 0 && self.end_index == 0 {
             self.start_index = 1;
@@ -135,7 +140,7 @@ where
 
 impl<K> IndexedAscendingQueueViewer<K> for IndexedAscendingSimpleQueue<K>
 where
-    K: BorshDeserialize + BorshSerialize + Clone + Ord,
+    K: BorshDeserialize + BorshSerialize + Clone + Ord + Debug,
 {
     ///
     fn start_index(&self) -> u64 {

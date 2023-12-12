@@ -89,19 +89,18 @@ where
     /// Add a new element to the queue.
     /// If the queue reaches max length, the oldest (first) element will be removed.
     pub fn push_back(&mut self, element: (K, V)) {
-        assert!(
-            self.end_index == 0 || &element.0 > self.index_map.get(&self.end_index).unwrap(),
-            "Invalid element to add, key: {:?}, value: {:?}. \
-            The key to be added should be larger than the latest key in the queue. \
-            Current index range of queue: {} - {}, index_map_storage_key_prefix: {:?}, \
-            value_map_storage_key_prefix: {:?}",
-            element.0,
-            element.1,
-            self.start_index,
-            self.end_index,
-            self.index_map_storage_key_prefix,
-            self.value_map_storage_key_prefix,
-        );
+        if !(self.end_index == 0 || &element.0 > self.index_map.get(&self.end_index).unwrap()) {
+            log!(
+                "Maybe invalid element to add, key: {:?}, value: {:?}. \
+                The key to be added should be larger than the latest key in the queue. \
+                Current index range of queue: {} - {}, latest key in queue: {:?}",
+                element.0,
+                element.1,
+                self.start_index,
+                self.end_index,
+                self.index_map.get(&self.end_index).unwrap()
+            );
+        };
         self.index_map.insert(self.end_index + 1, element.0.clone());
         self.value_map.insert(element.0, element.1);
         if self.start_index == 0 && self.end_index == 0 {
