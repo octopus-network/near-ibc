@@ -12,7 +12,7 @@ fn assert_testnet() {
 
 pub trait TestnetFunctions {
     ///
-    fn clear_ibc_events_history(&mut self) -> ProcessingResult;
+    fn clear_ibc_events_history(&mut self, height: Option<Height>) -> ProcessingResult;
     ///
     fn clear_ibc_store_counters(&mut self);
     ///
@@ -39,11 +39,11 @@ pub trait TestnetFunctions {
 #[near_bindgen]
 impl TestnetFunctions for NearIbcContract {
     ///
-    fn clear_ibc_events_history(&mut self) -> ProcessingResult {
+    fn clear_ibc_events_history(&mut self, height: Option<Height>) -> ProcessingResult {
         assert_testnet();
         self.assert_governance();
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
-        let result = near_ibc_store.clear_ibc_events_history();
+        let result = near_ibc_store.clear_ibc_events_history(height.as_ref());
         self.near_ibc_store.set(&near_ibc_store);
         result
     }

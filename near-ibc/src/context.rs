@@ -115,13 +115,13 @@ impl NearIbcStore {
     ///
     pub fn remove_client(&mut self, client_id: &ClientId) {
         if let Some(queue) = self.client_processed_heights.get_mut(client_id) {
-            queue.clear();
+            queue.clear(None);
             queue.flush();
         }
         self.client_processed_heights.remove(client_id);
         self.client_processed_heights.flush();
         if let Some(queue) = self.client_processed_times.get_mut(client_id) {
-            queue.clear();
+            queue.clear(None);
             queue.flush();
         }
         self.client_processed_times.remove(client_id);
@@ -223,8 +223,11 @@ impl NearIbcStore {
         self.channel_counter = 0;
     }
     ///
-    pub fn clear_ibc_events_history(&mut self) -> ProcessingResult {
-        self.ibc_events_history.clear()
+    pub fn clear_ibc_events_history(
+        &mut self,
+        less_than_height: Option<&Height>,
+    ) -> ProcessingResult {
+        self.ibc_events_history.clear(less_than_height)
     }
     ///
     pub fn flush(&mut self) {
