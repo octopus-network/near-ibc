@@ -138,32 +138,37 @@ where
         ProcessingResult::Ok
     }
     /// Clear the queue.
-    pub fn clear(&mut self) -> ProcessingResult {
+    pub fn clear(&mut self, lt_key: Option<&K>) -> ProcessingResult {
         let max_gas = env::prepaid_gas().saturating_mul(4).saturating_div(5);
         for index in self.start_index..self.end_index + 1 {
             if let Some(key) = self.index_map.get(&index) {
+                if lt_key.is_some() && key.ge(lt_key.unwrap()) {
+                    break;
+                }
                 env::storage_remove(
                     migration::get_storage_key_of_lookup_map(
                         &self.index_map_storage_key_prefix,
-                        &key,
+                        &index,
                     )
                     .as_slice(),
                 );
                 env::storage_remove(
                     migration::get_storage_key_of_lookup_map(
                         &self.value_map_storage_key_prefix,
-                        &index,
+                        &key,
                     )
                     .as_slice(),
                 );
             }
+            self.start_index = index + 1;
             if env::used_gas() >= max_gas {
-                self.start_index = index + 1;
                 return ProcessingResult::NeedMoreGas;
             }
         }
-        self.start_index = 0;
-        self.end_index = 0;
+        if self.start_index > self.end_index {
+            self.start_index = 0;
+            self.end_index = 0;
+        }
         ProcessingResult::Ok
     }
     /// Flush lookup map to storage.
