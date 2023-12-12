@@ -13,6 +13,7 @@ use ibc::core::{
         },
     },
 };
+use itertools::Itertools;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env, log,
@@ -206,6 +207,53 @@ impl NearIbcStore {
             port_channel_id.0,
             port_channel_id.1
         );
+    }
+    ///
+    pub fn clear_consensus_state_by(
+        &mut self,
+        client_id: &ClientId,
+        lt_height: Option<&Height>,
+    ) -> ProcessingResult {
+        let max_gas = env::prepaid_gas().saturating_mul(2).saturating_div(5);
+        let height_set = self
+            .client_consensus_state_height_sets
+            .get_mut(client_id)
+            .unwrap();
+        let height_iter: Box<dyn Iterator<Item = &Height>> = if lt_height.is_some() {
+            Box::new(height_set.iter().sorted())
+        } else {
+            Box::new(height_set.iter())
+        };
+
+        let mut result = ProcessingResult::Ok;
+        let mut need_remove_heights = vec![];
+        for height in height_iter {
+            if lt_height.is_some() && height.ge(lt_height.unwrap()) {
+                break;
+            }
+            env::storage_remove(
+                &ClientConsensusStatePath::new(
+                    client_id.clone(),
+                    height.revision_number(),
+                    height.revision_height(),
+                )
+                .to_string()
+                .into_bytes(),
+            );
+            need_remove_heights.push(height.clone());
+
+            if env::used_gas() >= max_gas {
+                result = ProcessingResult::NeedMoreGas;
+                break;
+            }
+        }
+
+        // It is why max_gas is 2/5 prepaid_gas
+        for height in need_remove_heights {
+            height_set.remove(&height);
+        }
+        self.client_consensus_state_height_sets.flush();
+        result
     }
     ///
     pub fn clear_counters(&mut self) {
