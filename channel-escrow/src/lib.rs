@@ -17,13 +17,13 @@ use ibc::apps::transfer::types::PORT_ID_STR;
 use near_contract_standards::fungible_token::core::ext_ft_core;
 use near_sdk::{
     borsh::{BorshDeserialize, BorshSerialize},
-    env,
+    env, ext_contract,
     json_types::{U128, U64},
-    near_bindgen,
+    log, near_bindgen,
     serde::{Deserialize, Serialize},
     serde_json,
     store::UnorderedMap,
-    AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise, PromiseOrValue,
+    AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise, PromiseOrValue, PromiseResult,
 };
 use utils::{
     interfaces::{
@@ -156,6 +156,50 @@ impl Contract {
     }
 }
 
+#[ext_contract(ext_ft_transfer_callback)]
+pub trait FtTransferCallback {
+    fn ft_transfer_callback(
+        &mut self,
+        token_contract: AccountId,
+        receiver_id: AccountId,
+        amount: U128,
+    );
+}
+
+#[near_bindgen]
+impl FtTransferCallback for Contract {
+    #[private]
+    fn ft_transfer_callback(
+        &mut self,
+        token_contract: AccountId,
+        receiver_id: AccountId,
+        amount: U128,
+    ) {
+        match env::promise_result(0) {
+            PromiseResult::Successful(_bytes) => {
+                log!(
+                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0",\
+                    "event":"FT_TRANSFER_SUCCEEDED","token_contract":"{}","receiver_id":"{}",\
+                    "amount":"{}"}}"#,
+                    token_contract,
+                    receiver_id,
+                    amount.0,
+                );
+            }
+            PromiseResult::Failed => {
+                log!(
+                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0",\
+                    "event":"ERR_FT_TRANSFER","token_contract":"{}","receiver_id":"{}",\
+                    "amount":"{}"}}"#,
+                    token_contract,
+                    receiver_id,
+                    amount.0,
+                );
+            }
+        }
+    }
+}
+
 #[near_bindgen]
 impl ChannelEscrow for Contract {
     #[payable]
@@ -197,7 +241,14 @@ impl ChannelEscrow for Contract {
             .with_attached_deposit(NearToken::from_yoctonear(1))
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(2))
             .with_unused_gas_weight(0)
-            .ft_transfer(receiver_id, amount, None);
+            .ft_transfer(receiver_id.clone(), amount, None)
+            .then(
+                ext_ft_transfer_callback::ext(env::current_account_id()).ft_transfer_callback(
+                    token_contract,
+                    receiver_id,
+                    amount,
+                ),
+            );
     }
 }
 
