@@ -197,7 +197,7 @@ impl ChannelEscrow for Contract {
             .with_attached_deposit(NearToken::from_yoctonear(1))
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(2))
             .with_unused_gas_weight(0)
-            .ft_transfer(receiver_id, amount.into(), None);
+            .ft_transfer(receiver_id, amount, None);
     }
 }
 

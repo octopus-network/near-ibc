@@ -19,8 +19,8 @@ panic = "abort"
 overflow-checks = true
 
 [workspace.dependencies]
-near-sdk = { git = "https://github.com/near/near-sdk-rs", branch = "master" }
-near-contract-standards = { git = "https://github.com/near/near-sdk-rs", branch = "master" }
+near-sdk = { git = "https://github.com/near/near-sdk-rs", tag = "near-sdk-v5.0.0-alpha.1" }
+near-contract-standards = { git = "https://github.com/near/near-sdk-rs", tag = "near-sdk-v5.0.0-alpha.1" }
 ibc = { version = "0.48.1", default-features = false, features = ["borsh","serde"] }
 ibc-proto = { version = "0.38.0", default-features = false, features = ["serde"] }
 sha2 = { version = "0.10.6", default-features = false }
