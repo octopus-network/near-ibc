@@ -35,6 +35,8 @@ use near_sdk::{
     store::{LookupMap, UnorderedMap, UnorderedSet},
 };
 
+const MAX_STATE_HISTORY_SIZE: u32 = 50;
+
 impl ClientExecutionContext for NearIbcStore {
     type V = Self;
 
@@ -95,6 +97,18 @@ impl ClientExecutionContext for NearIbcStore {
                     )
                     .unwrap(),
                 );
+                if heights.len() > MAX_STATE_HISTORY_SIZE {
+                    let mut all_heights: Vec<Height> =
+                        heights.into_iter().map(|h| h.clone()).collect();
+                    all_heights.sort();
+                    let first_cs_path = ClientConsensusStatePath {
+                        client_id: consensus_state_path.client_id.clone(),
+                        revision_number: all_heights[0].revision_number(),
+                        revision_height: all_heights[0].revision_height(),
+                    };
+                    env::storage_remove(&first_cs_path.to_string().into_bytes());
+                    heights.remove(&all_heights[0]);
+                }
             });
         Ok(())
     }
@@ -123,6 +137,15 @@ impl ClientExecutionContext for NearIbcStore {
             .get_mut(&client_id)
             .map(|processed_times| {
                 processed_times.insert(height, timestamp.nanoseconds());
+                if processed_times.len() > MAX_STATE_HISTORY_SIZE {
+                    let mut all_heights: Vec<Height> = processed_times
+                        .keys()
+                        .into_iter()
+                        .map(|k| k.clone())
+                        .collect();
+                    all_heights.sort();
+                    processed_times.remove(&all_heights[0]);
+                }
             });
         Ok(())
     }
@@ -151,6 +174,15 @@ impl ClientExecutionContext for NearIbcStore {
             .get_mut(&client_id)
             .map(|processed_heights| {
                 processed_heights.insert(height, host_height);
+                if processed_heights.len() > MAX_STATE_HISTORY_SIZE {
+                    let mut all_heights: Vec<Height> = processed_heights
+                        .keys()
+                        .into_iter()
+                        .map(|k| k.clone())
+                        .collect();
+                    all_heights.sort();
+                    processed_heights.remove(&all_heights[0]);
+                }
             });
         Ok(())
     }
