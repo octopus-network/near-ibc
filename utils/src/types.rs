@@ -38,3 +38,9 @@ pub struct Ics20TransferRequest {
     pub receiver: String,
     pub timeout_seconds: Option<U64>,
 }
+
+impl ToString for AssetDenom {
+    fn to_string(&self) -> String {
+        format!("{}/{}", self.trace_path, self.base_denom)
+    }
+}

@@ -1,12 +1,12 @@
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    env,
+    env, ext_contract,
     json_types::{Base58CryptoHash, U128},
-    near_bindgen,
+    log, near_bindgen,
     serde::{Deserialize, Serialize},
     store::UnorderedMap,
-    AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise,
+    AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise, PromiseResult,
 };
 use utils::{
     interfaces::{ext_wrapped_token, TokenFactory},
@@ -166,11 +166,67 @@ impl TokenFactory for Contract {
             format!("{}.{}", maybe_asset.unwrap().0, env::current_account_id())
                 .parse()
                 .unwrap();
-        ext_wrapped_token::ext(token_contract_id)
+        ext_wrapped_token::ext(token_contract_id.clone())
             .with_attached_deposit(env::attached_deposit())
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(3))
             .with_unused_gas_weight(0)
-            .mint(token_owner, amount);
+            .mint(token_owner.clone(), amount)
+            .then(
+                ext_mint_callback::ext(env::current_account_id()).mint_callback(
+                    asset_denom.to_string(),
+                    token_contract_id,
+                    token_owner,
+                    amount,
+                ),
+            );
+    }
+}
+
+#[ext_contract(ext_mint_callback)]
+pub trait MintCallback {
+    fn mint_callback(
+        &mut self,
+        denom: String,
+        token_contract: AccountId,
+        token_owner: AccountId,
+        amount: U128,
+    );
+}
+
+#[near_bindgen]
+impl MintCallback for Contract {
+    #[private]
+    fn mint_callback(
+        &mut self,
+        denom: String,
+        token_contract: AccountId,
+        token_owner: AccountId,
+        amount: U128,
+    ) {
+        match env::promise_result(0) {
+            PromiseResult::Successful(_bytes) => {
+                log!(
+                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0",\
+                    "event":"MINT_SUCCEEDED","denom":"{}","token_contract":"{}",\
+                    "token_owner":"{}","amount":"{}"}}"#,
+                    denom,
+                    token_contract,
+                    token_owner,
+                    amount.0,
+                );
+            }
+            PromiseResult::Failed => {
+                log!(
+                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0",\
+                    "event":"ERR_MINT","denom":"{}","token_contract":"{}",\
+                    "receiver_id":"{}","amount":"{}"}}"#,
+                    denom,
+                    token_contract,
+                    token_owner,
+                    amount.0,
+                );
+            }
+        }
     }
 }
 
