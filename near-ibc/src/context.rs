@@ -105,13 +105,13 @@ impl NearIbcStore {
     ///
     pub fn remove_client(&mut self, client_id: &ClientId) {
         if let Some(queue) = self.client_processed_heights.get_mut(client_id) {
-            queue.clear(None);
+            queue.clear();
             queue.flush();
         }
         self.client_processed_heights.remove(client_id);
         self.client_processed_heights.flush();
         if let Some(queue) = self.client_processed_times.get_mut(client_id) {
-            queue.clear(None);
+            queue.clear();
             queue.flush();
         }
         self.client_processed_times.remove(client_id);
