@@ -1,6 +1,7 @@
 use super::consensus_state::AnyConsensusState;
+use crate::context::NearEd25519Verifier;
 use crate::{collections::IndexedAscendingQueueViewer, context::NearIbcStore, prelude::*};
-use core::time::Duration;
+use ibc::core::ics02_client::client_state::Status;
 use ibc::{
     clients::ics07_tendermint::client_state::ClientState as TmClientState,
     core::{
@@ -22,23 +23,16 @@ use ibc::{
     Height,
 };
 use ibc_proto::{
-    google::protobuf::Any,
-    ibc::lightclients::{
-        solomachine::v3::ClientState as RawSmClientState,
-        tendermint::v1::ClientState as RawTmClientState,
-    },
+    google::protobuf::Any, ibc::lightclients::tendermint::v1::ClientState as RawTmClientState,
     protobuf::Protobuf,
 };
-use ics06_solomachine::v3::client_state::ClientState as SmClientState;
 use serde::{Deserialize, Serialize};
 
 const TENDERMINT_CLIENT_STATE_TYPE_URL: &str = "/ibc.lightclients.tendermint.v1.ClientState";
-const SOLOMACHINE_CLIENT_STATE_TYPE_URL: &str = "/ibc.lightclients.solomachine.v3.ClientState";
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum AnyClientState {
-    Tendermint(TmClientState),
-    Solomachine(SmClientState),
+    Tendermint(TmClientState<NearEd25519Verifier>),
 }
 
 impl Protobuf<Any> for AnyClientState {}
@@ -50,13 +44,6 @@ impl TryFrom<Any> for AnyClientState {
         match raw.type_url.as_str() {
             TENDERMINT_CLIENT_STATE_TYPE_URL => Ok(AnyClientState::Tendermint(
                 Protobuf::<RawTmClientState>::decode_vec(&raw.value).map_err(|e| {
-                    ClientError::ClientSpecific {
-                        description: e.to_string(),
-                    }
-                })?,
-            )),
-            SOLOMACHINE_CLIENT_STATE_TYPE_URL => Ok(AnyClientState::Solomachine(
-                Protobuf::<RawSmClientState>::decode_vec(&raw.value).map_err(|e| {
                     ClientError::ClientSpecific {
                         description: e.to_string(),
                     }
@@ -76,10 +63,6 @@ impl From<AnyClientState> for Any {
                 type_url: TENDERMINT_CLIENT_STATE_TYPE_URL.to_string(),
                 value: Protobuf::<RawTmClientState>::encode_vec(&client_state),
             },
-            AnyClientState::Solomachine(client_state) => Any {
-                type_url: SOLOMACHINE_CLIENT_STATE_TYPE_URL.to_string(),
-                value: Protobuf::<RawSmClientState>::encode_vec(&client_state),
-            },
         }
     }
 }
@@ -96,9 +79,6 @@ impl ClientStateValidation<NearIbcStore> for AnyClientState {
             AnyClientState::Tendermint(client_state) => {
                 client_state.verify_client_message(ctx, client_id, client_message, update_kind)
             }
-            AnyClientState::Solomachine(client_state) => {
-                client_state.verify_client_message(ctx, client_id, client_message, update_kind)
-            }
         }
     }
 
@@ -113,9 +93,11 @@ impl ClientStateValidation<NearIbcStore> for AnyClientState {
             AnyClientState::Tendermint(client_state) => {
                 client_state.check_for_misbehaviour(ctx, client_id, client_message, update_kind)
             }
-            AnyClientState::Solomachine(client_state) => {
-                client_state.check_for_misbehaviour(ctx, client_id, client_message, update_kind)
-            }
+        }
+    }
+    fn status(&self, ctx: &NearIbcStore, client_id: &ClientId) -> Result<Status, ClientError> {
+        match self {
+            AnyClientState::Tendermint(client_state) => client_state.status(ctx, client_id),
         }
     }
 }
@@ -126,23 +108,18 @@ impl ClientStateCommon for AnyClientState {
             AnyClientState::Tendermint(client_state) => {
                 client_state.verify_consensus_state(consensus_state)
             }
-            AnyClientState::Solomachine(client_state) => {
-                client_state.verify_consensus_state(consensus_state)
-            }
         }
     }
 
     fn client_type(&self) -> ClientType {
         match self {
             AnyClientState::Tendermint(client_state) => client_state.client_type(),
-            AnyClientState::Solomachine(client_state) => client_state.client_type(),
         }
     }
 
     fn latest_height(&self) -> Height {
         match self {
             AnyClientState::Tendermint(client_state) => client_state.latest_height(),
-            AnyClientState::Solomachine(client_state) => client_state.latest_height(),
         }
     }
 
@@ -151,23 +128,6 @@ impl ClientStateCommon for AnyClientState {
             AnyClientState::Tendermint(client_state) => {
                 client_state.validate_proof_height(proof_height)
             }
-            AnyClientState::Solomachine(client_state) => {
-                client_state.validate_proof_height(proof_height)
-            }
-        }
-    }
-
-    fn confirm_not_frozen(&self) -> Result<(), ClientError> {
-        match self {
-            AnyClientState::Tendermint(client_state) => client_state.confirm_not_frozen(),
-            AnyClientState::Solomachine(client_state) => client_state.confirm_not_frozen(),
-        }
-    }
-
-    fn expired(&self, elapsed: Duration) -> bool {
-        match self {
-            AnyClientState::Tendermint(client_state) => client_state.expired(elapsed),
-            AnyClientState::Solomachine(client_state) => client_state.expired(elapsed),
         }
     }
 
@@ -181,13 +141,6 @@ impl ClientStateCommon for AnyClientState {
     ) -> Result<(), ClientError> {
         match self {
             AnyClientState::Tendermint(client_state) => client_state.verify_upgrade_client(
-                upgraded_client_state,
-                upgraded_consensus_state,
-                proof_upgrade_client,
-                proof_upgrade_consensus_state,
-                root,
-            ),
-            AnyClientState::Solomachine(client_state) => client_state.verify_upgrade_client(
                 upgraded_client_state,
                 upgraded_consensus_state,
                 proof_upgrade_client,
@@ -209,9 +162,6 @@ impl ClientStateCommon for AnyClientState {
             AnyClientState::Tendermint(client_state) => {
                 client_state.verify_membership(prefix, proof, root, path, value)
             }
-            AnyClientState::Solomachine(client_state) => {
-                client_state.verify_membership(prefix, proof, root, path, value)
-            }
         }
     }
 
@@ -226,22 +176,13 @@ impl ClientStateCommon for AnyClientState {
             AnyClientState::Tendermint(client_state) => {
                 client_state.verify_non_membership(prefix, proof, root, path)
             }
-            AnyClientState::Solomachine(client_state) => {
-                client_state.verify_non_membership(prefix, proof, root, path)
-            }
         }
     }
 }
 
-impl From<TmClientState> for AnyClientState {
-    fn from(value: TmClientState) -> Self {
+impl From<TmClientState<NearEd25519Verifier>> for AnyClientState {
+    fn from(value: TmClientState<NearEd25519Verifier>) -> Self {
         AnyClientState::Tendermint(value)
-    }
-}
-
-impl From<SmClientState> for AnyClientState {
-    fn from(value: SmClientState) -> Self {
-        AnyClientState::Solomachine(value)
     }
 }
 
@@ -256,9 +197,6 @@ impl ClientStateExecution<NearIbcStore> for AnyClientState {
             AnyClientState::Tendermint(client_state) => {
                 client_state.initialise(ctx, client_id, consensus_state)
             }
-            AnyClientState::Solomachine(client_state) => {
-                client_state.initialise(ctx, client_id, consensus_state)
-            }
         }
     }
 
@@ -270,9 +208,6 @@ impl ClientStateExecution<NearIbcStore> for AnyClientState {
     ) -> Result<Vec<Height>, ClientError> {
         match self {
             AnyClientState::Tendermint(client_state) => {
-                client_state.update_state(ctx, client_id, header)
-            }
-            AnyClientState::Solomachine(client_state) => {
                 client_state.update_state(ctx, client_id, header)
             }
         }
@@ -292,12 +227,6 @@ impl ClientStateExecution<NearIbcStore> for AnyClientState {
                 client_message,
                 update_kind,
             ),
-            AnyClientState::Solomachine(client_state) => client_state.update_state_on_misbehaviour(
-                ctx,
-                client_id,
-                client_message,
-                update_kind,
-            ),
         }
     }
 
@@ -310,12 +239,6 @@ impl ClientStateExecution<NearIbcStore> for AnyClientState {
     ) -> Result<Height, ClientError> {
         match self {
             AnyClientState::Tendermint(client_state) => client_state.update_state_on_upgrade(
-                ctx,
-                client_id,
-                upgraded_client_state,
-                upgraded_consensus_state,
-            ),
-            AnyClientState::Solomachine(client_state) => client_state.update_state_on_upgrade(
                 ctx,
                 client_id,
                 upgraded_client_state,
@@ -339,63 +262,6 @@ impl ibc::clients::ics07_tendermint::CommonContext for NearIbcStore {
 }
 
 impl ibc::clients::ics07_tendermint::ValidationContext for NearIbcStore {
-    fn host_timestamp(&self) -> Result<Timestamp, ContextError> {
-        ValidationContext::host_timestamp(self)
-    }
-
-    fn next_consensus_state(
-        &self,
-        client_id: &ClientId,
-        height: &Height,
-    ) -> Result<Option<Self::AnyConsensusState>, ContextError> {
-        if let Some(consensus_state_keys) = self.client_consensus_state_height_sets.get(client_id) {
-            consensus_state_keys
-                .get_next_key_by_key(height)
-                .map(|next_height| {
-                    self.consensus_state(&ClientConsensusStatePath::new(client_id, next_height))
-                })
-                .map_or_else(|| Ok(None), |cs| Ok(Some(cs.unwrap())))
-        } else {
-            Err(ContextError::ClientError(
-                ClientError::MissingRawConsensusState,
-            ))
-        }
-    }
-
-    fn prev_consensus_state(
-        &self,
-        client_id: &ClientId,
-        height: &Height,
-    ) -> Result<Option<Self::AnyConsensusState>, ContextError> {
-        if let Some(consensus_state_keys) = self.client_consensus_state_height_sets.get(client_id) {
-            consensus_state_keys
-                .get_previous_key_by_key(height)
-                .map(|next_height| {
-                    self.consensus_state(&ClientConsensusStatePath::new(client_id, next_height))
-                })
-                .map_or_else(|| Ok(None), |cs| Ok(Some(cs.unwrap())))
-        } else {
-            Err(ContextError::ClientError(
-                ClientError::MissingRawConsensusState,
-            ))
-        }
-    }
-}
-
-impl ics06_solomachine::v3::CommonContext for NearIbcStore {
-    type ConversionError = ClientError;
-
-    type AnyConsensusState = AnyConsensusState;
-
-    fn consensus_state(
-        &self,
-        client_cons_state_path: &ClientConsensusStatePath,
-    ) -> Result<Self::AnyConsensusState, ContextError> {
-        ValidationContext::consensus_state(self, client_cons_state_path)
-    }
-}
-
-impl ics06_solomachine::v3::ValidationContext for NearIbcStore {
     fn host_timestamp(&self) -> Result<Timestamp, ContextError> {
         ValidationContext::host_timestamp(self)
     }

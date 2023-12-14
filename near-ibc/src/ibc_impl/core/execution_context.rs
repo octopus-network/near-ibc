@@ -105,9 +105,10 @@ impl ClientExecutionContext for NearIbcStore {
 }
 
 impl ExecutionContext for NearIbcStore {
-    fn increase_client_counter(&mut self) {
+    fn increase_client_counter(&mut self) -> Result<(), ContextError> {
         self.client_counter += 1;
         log!("client_counter has increased to: {}", self.client_counter);
+        Ok(())
     }
 
     fn store_update_time(
@@ -209,6 +210,7 @@ impl ExecutionContext for NearIbcStore {
             conn_id
         );
         #[derive(BorshDeserialize, BorshSerialize, Debug)]
+        #[borsh(crate = "near_sdk::borsh")]
         struct ConnectionIds(pub Vec<ConnectionId>);
         let key = client_connection_path.to_string().into_bytes();
         let data = if env::storage_has_key(&key) {
@@ -219,14 +221,14 @@ impl ExecutionContext for NearIbcStore {
                     })
                 })?;
             connection_ids.0.push(conn_id);
-            connection_ids.try_to_vec().map_err(|e| {
+            borsh::to_vec(&connection_ids).map_err(|e| {
                 ContextError::ConnectionError(ConnectionError::Other {
                     description: format!("ConnectionIds encoding error: {:?}", e),
                 })
             })?
         } else {
             let connection_ids = ConnectionIds(vec![conn_id]);
-            connection_ids.try_to_vec().map_err(|e| {
+            borsh::to_vec(&connection_ids).map_err(|e| {
                 ContextError::ConnectionError(ConnectionError::Other {
                     description: format!("ConnectionIds encoding error: {:?}", e),
                 })
@@ -236,12 +238,13 @@ impl ExecutionContext for NearIbcStore {
         Ok(())
     }
 
-    fn increase_connection_counter(&mut self) {
+    fn increase_connection_counter(&mut self) -> Result<(), ContextError> {
         self.connection_counter += 1;
         log!(
             "connection_counter has increased to: {}",
             self.connection_counter
         );
+        Ok(())
     }
 
     fn store_packet_commitment(
@@ -301,7 +304,7 @@ impl ExecutionContext for NearIbcStore {
             receipt_path,
             receipt
         );
-        let data = receipt.try_to_vec().unwrap();
+        let data = borsh::to_vec(&receipt).unwrap();
         let key = receipt_path.to_string().into_bytes();
         env::storage_write(&key, &data);
         //
@@ -388,7 +391,7 @@ impl ExecutionContext for NearIbcStore {
             seq_send_path,
             seq
         );
-        let data = seq.try_to_vec().unwrap();
+        let data = borsh::to_vec(&seq).unwrap();
         let key = seq_send_path.to_string().into_bytes();
         env::storage_write(&key, &data);
         Ok(())
@@ -404,7 +407,7 @@ impl ExecutionContext for NearIbcStore {
             seq_recv_path,
             seq
         );
-        let data = seq.try_to_vec().unwrap();
+        let data = borsh::to_vec(&seq).unwrap();
         let key = seq_recv_path.to_string().into_bytes();
         env::storage_write(&key, &data);
         Ok(())
@@ -420,18 +423,19 @@ impl ExecutionContext for NearIbcStore {
             seq_ack_path,
             seq
         );
-        let data = seq.try_to_vec().unwrap();
+        let data = borsh::to_vec(&seq).unwrap();
         let key = seq_ack_path.to_string().into_bytes();
         env::storage_write(&key, &data);
         Ok(())
     }
 
-    fn increase_channel_counter(&mut self) {
+    fn increase_channel_counter(&mut self) -> Result<(), ContextError> {
         self.channel_counter += 1;
         log!("channel_counter has increased to: {}", self.channel_counter);
+        Ok(())
     }
 
-    fn emit_ibc_event(&mut self, event: IbcEvent) {
+    fn emit_ibc_event(&mut self, event: IbcEvent) -> Result<(), ContextError> {
         let height = self.host_height().unwrap();
         if self.ibc_events_history.contains_key(&height) {
             self.ibc_events_history
@@ -442,10 +446,12 @@ impl ExecutionContext for NearIbcStore {
                 .push_back((height, vec![event.clone()]));
         }
         event.emit();
+        Ok(())
     }
 
-    fn log_message(&mut self, message: String) {
+    fn log_message(&mut self, message: String) -> Result<(), ContextError> {
         log!("{}", message);
+        Ok(())
     }
 
     fn get_client_execution_context(&mut self) -> &mut Self::E {

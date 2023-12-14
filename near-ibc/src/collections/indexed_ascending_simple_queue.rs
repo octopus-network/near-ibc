@@ -1,6 +1,6 @@
-use crate::{types::ProcessingResult, *};
-
 use super::IndexedAscendingQueueViewer;
+use crate::{types::ProcessingResult, *};
+use core::fmt::Debug;
 
 /// A simple implementation of `indexed ordered queue`.
 ///
@@ -15,9 +15,10 @@ use super::IndexedAscendingQueueViewer;
 /// when remove them from the queue, the extra storage usage will not be released.
 ///
 #[derive(BorshDeserialize, BorshSerialize)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct IndexedAscendingSimpleQueue<K>
 where
-    K: BorshDeserialize + BorshSerialize + Clone + Ord,
+    K: BorshDeserialize + BorshSerialize + Clone + Ord + Debug,
 {
     /// The map of index to K.
     index_map: LookupMap<u64, K>,
@@ -34,7 +35,7 @@ where
 /// Implement change functions for `IndexedLookupQueue`.
 impl<K> IndexedAscendingSimpleQueue<K>
 where
-    K: BorshDeserialize + BorshSerialize + Clone + Ord,
+    K: BorshDeserialize + BorshSerialize + Clone + Ord + Debug,
 {
     ///
     pub fn new(index_map_storage_key: StorageKey, max_length: u64) -> Self {
@@ -63,10 +64,15 @@ where
     }
     ///
     pub fn push_back(&mut self, key: K) {
-        assert!(
-            self.end_index == 0 || &key > self.get_key_by_index(&self.end_index).unwrap(),
-            "The key to be added should be larger than the latest key in the queue."
-        );
+        if !(self.end_index == 0 || &key > self.get_key_by_index(&self.end_index).unwrap()) {
+            log!(
+                "The key to be added should be larger than the latest key in the queue. \
+            Key: {:?}, Latest key: {:?}",
+                key,
+                self.get_key_by_index(&self.end_index).unwrap()
+            );
+        }
+
         self.index_map.insert(self.end_index + 1, key.clone());
         if self.start_index == 0 && self.end_index == 0 {
             self.start_index = 1;
@@ -89,7 +95,7 @@ where
     ///
     pub fn set_max_length(&mut self, max_length: u64) -> ProcessingResult {
         self.max_length = max_length;
-        let max_gas = env::prepaid_gas() * 4 / 5;
+        let max_gas = env::prepaid_gas().saturating_mul(4).saturating_div(5);
         while self.end_index - self.start_index + 1 > self.max_length {
             self.pop_front();
             self.flush();
@@ -106,7 +112,7 @@ where
     }
     /// Clear the queue.
     pub fn clear(&mut self) -> ProcessingResult {
-        let max_gas = env::prepaid_gas() * 4 / 5;
+        let max_gas = env::prepaid_gas().saturating_mul(4).saturating_div(5);
         for index in self.start_index..self.end_index + 1 {
             if let Some(key) = self.index_map.get(&index) {
                 env::storage_remove(
@@ -134,7 +140,7 @@ where
 
 impl<K> IndexedAscendingQueueViewer<K> for IndexedAscendingSimpleQueue<K>
 where
-    K: BorshDeserialize + BorshSerialize + Clone + Ord,
+    K: BorshDeserialize + BorshSerialize + Clone + Ord + Debug,
 {
     ///
     fn start_index(&self) -> u64 {

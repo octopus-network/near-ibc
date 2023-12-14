@@ -2,7 +2,6 @@ use crate::{
     collections::{
         IndexedAscendingLookupQueue, IndexedAscendingQueueViewer, IndexedAscendingSimpleQueue,
     },
-    module_holder::ModuleHolder,
     prelude::*,
     types::ProcessingResult,
     StorageKey,
@@ -27,14 +26,14 @@ use near_sdk::{
     env, log,
     store::{LookupMap, UnorderedSet},
 };
+use serde::{Deserialize, Serialize};
 
 pub type NearTimeStamp = u64;
 pub type HostHeight = Height;
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct NearIbcStore {
-    /// To support the mutable borrow in `Router::get_route_mut`.
-    pub module_holder: ModuleHolder,
     /// The client ids of the clients.
     pub client_id_set: UnorderedSet<ClientId>,
     pub client_counter: u64,
@@ -66,15 +65,15 @@ pub struct NearIbcStore {
 pub trait NearIbcStoreHost {
     ///
     fn get_near_ibc_store() -> NearIbcStore {
-        let store =
-            near_sdk::env::storage_read(&StorageKey::NearIbcStore.try_to_vec().unwrap()).unwrap();
+        let store = near_sdk::env::storage_read(&borsh::to_vec(&StorageKey::NearIbcStore).unwrap())
+            .unwrap();
         let store = NearIbcStore::try_from_slice(&store).unwrap();
         store
     }
     ///
     fn set_near_ibc_store(store: &NearIbcStore) {
-        let store = store.try_to_vec().unwrap();
-        near_sdk::env::storage_write(&StorageKey::NearIbcStore.try_to_vec().unwrap(), &store);
+        let store = borsh::to_vec(&store).unwrap();
+        near_sdk::env::storage_write(&borsh::to_vec(&StorageKey::NearIbcStore).unwrap(), &store);
     }
 }
 
@@ -88,7 +87,6 @@ impl NearIbcStore {
     ///
     pub fn new() -> Self {
         Self {
-            module_holder: ModuleHolder::new(),
             client_id_set: UnorderedSet::new(StorageKey::ClientIdSet),
             client_counter: 0,
             client_processed_times: LookupMap::new(StorageKey::ClientProcessedTimes),
@@ -117,13 +115,13 @@ impl NearIbcStore {
     ///
     pub fn remove_client(&mut self, client_id: &ClientId) {
         if let Some(queue) = self.client_processed_heights.get_mut(client_id) {
-            queue.clear();
+            queue.clear(None);
             queue.flush();
         }
         self.client_processed_heights.remove(client_id);
         self.client_processed_heights.flush();
         if let Some(queue) = self.client_processed_times.get_mut(client_id) {
-            queue.clear();
+            queue.clear(None);
             queue.flush();
         }
         self.client_processed_times.remove(client_id);
@@ -225,8 +223,11 @@ impl NearIbcStore {
         self.channel_counter = 0;
     }
     ///
-    pub fn clear_ibc_events_history(&mut self) -> ProcessingResult {
-        self.ibc_events_history.clear()
+    pub fn clear_ibc_events_history(
+        &mut self,
+        less_than_height: Option<&Height>,
+    ) -> ProcessingResult {
+        self.ibc_events_history.clear(less_than_height)
     }
     ///
     pub fn flush(&mut self) {
@@ -240,5 +241,32 @@ impl NearIbcStore {
         self.packet_receipt_sequence_sets.flush();
         self.packet_acknowledgement_sequence_sets.flush();
         self.ibc_events_history.flush();
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+pub struct NearEd25519Verifier;
+
+impl tendermint::crypto::signature::Verifier for NearEd25519Verifier {
+    fn verify(
+        pubkey: tendermint::PublicKey,
+        msg: &[u8],
+        signature: &tendermint::Signature,
+    ) -> Result<(), tendermint::crypto::signature::Error> {
+        if env::ed25519_verify(
+            signature
+                .as_bytes()
+                .try_into()
+                .map_err(|_| tendermint::crypto::signature::Error::MalformedSignature)?,
+            msg,
+            &pubkey
+                .to_bytes()
+                .try_into()
+                .map_err(|_| tendermint::crypto::signature::Error::MalformedPublicKey)?,
+        ) {
+            Ok(())
+        } else {
+            Err(tendermint::crypto::signature::Error::VerificationFailed)
+        }
     }
 }

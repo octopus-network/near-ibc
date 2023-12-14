@@ -15,6 +15,7 @@ use utils::{
 };
 
 #[derive(BorshSerialize, BorshStorageKey)]
+#[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
     TokenContractWasm,
     AssetIdMappings,
@@ -22,6 +23,7 @@ pub enum StorageKey {
 
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct Contract {
     asset_id_mappings: UnorderedMap<String, CrossChainAsset>,
 }
@@ -73,7 +75,7 @@ impl TokenFactory for Contract {
         self.assert_asset_not_registered(&cross_chain_asset);
         let minimum_deposit = utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT
             + env::storage_byte_cost()
-                * (32 + cross_chain_asset.try_to_vec().unwrap().len()) as u128;
+                * (32 + borsh::to_vec(&cross_chain_asset).unwrap().len()) as u128;
         assert!(
             env::attached_deposit() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
@@ -82,13 +84,14 @@ impl TokenFactory for Contract {
         let used_bytes = env::storage_usage();
         ExtraDepositCost::reset();
         // Generate asset id.
-        let mut asset_id = hex::encode(env::sha256(asset_denom.try_to_vec().unwrap().as_slice()))
-            .get(0..32)
-            .unwrap()
-            .to_string();
+        let mut asset_id =
+            hex::encode(env::sha256(borsh::to_vec(&asset_denom).unwrap().as_slice()))
+                .get(0..32)
+                .unwrap()
+                .to_string();
         let mut retry: u8 = 0;
         while self.asset_id_mappings.contains_key(&asset_id) {
-            let mut bytes = asset_denom.try_to_vec().unwrap();
+            let mut bytes = borsh::to_vec(&asset_denom).unwrap();
             bytes.push(retry);
             asset_id = hex::encode(env::sha256(bytes.as_slice()))
                 .get(0..32)
@@ -122,7 +125,7 @@ impl TokenFactory for Contract {
             .create_account()
             .transfer(utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT)
             .deploy_contract(
-                env::storage_read(&StorageKey::TokenContractWasm.try_to_vec().unwrap()).unwrap(),
+                env::storage_read(&borsh::to_vec(&StorageKey::TokenContractWasm).unwrap()).unwrap(),
             )
             .function_call(
                 "new".to_string(),
@@ -163,7 +166,7 @@ impl TokenFactory for Contract {
                 .unwrap();
         ext_wrapped_token::ext(token_contract_id)
             .with_attached_deposit(env::attached_deposit())
-            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 3)
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(3))
             .with_unused_gas_weight(0)
             .mint(token_owner, amount);
     }
@@ -200,7 +203,7 @@ pub extern "C" fn store_wasm_of_token_contract() {
     let input = env::input().expect("ERR_NO_INPUT");
     let sha256_hash = env::sha256(&input);
 
-    let current_len = env::storage_read(&StorageKey::TokenContractWasm.try_to_vec().unwrap())
+    let current_len = env::storage_read(&borsh::to_vec(&StorageKey::TokenContractWasm).unwrap())
         .map_or_else(|| 0, |bytes| bytes.len());
     let blob_len = input.len();
     if blob_len > current_len {
@@ -213,7 +216,10 @@ pub extern "C" fn store_wasm_of_token_contract() {
         );
     }
 
-    env::storage_write(&StorageKey::TokenContractWasm.try_to_vec().unwrap(), &input);
+    env::storage_write(
+        &borsh::to_vec(&StorageKey::TokenContractWasm).unwrap(),
+        &input,
+    );
 
     let mut blob_hash = [0u8; 32];
     blob_hash.copy_from_slice(&sha256_hash);

@@ -5,12 +5,15 @@ use crate::{
     *,
 };
 use ibc::core::{events::IbcEvent, ics04_channel::packet::Sequence};
-use near_sdk::store::UnorderedSet;
+use near_sdk::{borsh, store::UnorderedSet};
+
+pub trait StorageMigration {
+    fn migrate_state() -> Self;
+}
 
 #[derive(BorshDeserialize, BorshSerialize)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct OldNearIbcStore {
-    /// To support the mutable borrow in `Router::get_route_mut`.
-    pub module_holder: ModuleHolder,
     /// The client ids of the clients.
     pub client_id_set: UnorderedSet<ClientId>,
     pub client_counter: u64,
@@ -40,28 +43,32 @@ pub struct OldNearIbcStore {
 }
 
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct OldContract {
     near_ibc_store: LazyOption<OldNearIbcStore>,
+    /// To support the mutable borrow in `Router::get_route_mut`.
+    module_holder: ModuleHolder,
     governance_account: AccountId,
 }
 
 #[near_bindgen]
-impl Contract {
+impl StorageMigration for NearIbcContract {
     #[init(ignore_state)]
-    pub fn migrate_state() -> Self {
+    fn migrate_state() -> Self {
         // Deserialize the state using the old contract structure.
         let old_contract: OldContract = env::state_read().expect("Old state doesn't exist");
         //
         near_sdk::assert_self();
         //
         // Create the new contract using the data from the old contract.
-        let new_contract = Contract {
+        let new_contract = NearIbcContract {
             near_ibc_store: LazyOption::new(
                 StorageKey::NearIbcStore,
                 Some(&NearIbcStore::from_old_version(
                     old_contract.near_ibc_store.get().unwrap(),
                 )),
             ),
+            module_holder: old_contract.module_holder,
             governance_account: old_contract.governance_account,
         };
         //
@@ -72,13 +79,16 @@ impl Contract {
 }
 
 pub fn get_storage_key_of_lookup_map<T: BorshSerialize>(prefix: &StorageKey, index: &T) -> Vec<u8> {
-    [prefix.try_to_vec().unwrap(), index.try_to_vec().unwrap()].concat()
+    [
+        borsh::to_vec(&prefix).unwrap(),
+        borsh::to_vec(&index).unwrap(),
+    ]
+    .concat()
 }
 
 impl NearIbcStore {
     pub fn from_old_version(old_version: OldNearIbcStore) -> Self {
         Self {
-            module_holder: old_version.module_holder,
             client_id_set: old_version.client_id_set,
             client_counter: old_version.client_counter,
             client_processed_times: old_version.client_processed_times,

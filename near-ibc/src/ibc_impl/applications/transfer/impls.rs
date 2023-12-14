@@ -1,9 +1,5 @@
 use super::{AccountIdConversion, TransferModule};
-use crate::{
-    context::{NearIbcStore, NearIbcStoreHost},
-    ibc_impl::core::{client_state::AnyClientState, consensus_state::AnyConsensusState},
-    prelude::*,
-};
+use crate::prelude::*;
 use core::str::FromStr;
 use ibc::{
     applications::transfer::{
@@ -11,20 +7,7 @@ use ibc::{
         error::TokenTransferError,
         PrefixedCoin,
     },
-    core::{
-        ics03_connection::connection::ConnectionEnd,
-        ics04_channel::{
-            channel::ChannelEnd,
-            commitment::PacketCommitment,
-            context::{SendPacketExecutionContext, SendPacketValidationContext},
-            packet::Sequence,
-        },
-        ics24_host::{
-            identifier::{ChannelId, ClientId, ConnectionId, PortId},
-            path::{ChannelEndPath, ClientConsensusStatePath, CommitmentPath, SeqSendPath},
-        },
-        ContextError, ExecutionContext, ValidationContext,
-    },
+    core::ics24_host::identifier::{ChannelId, PortId},
 };
 use near_sdk::{env, json_types::U128, log};
 use utils::{
@@ -58,7 +41,7 @@ impl TokenTransferExecutionContext for TransferModule {
         } else if sender_id.ends_with(prefixed_ef.as_str()) {
             ext_channel_escrow::ext(from.0.clone())
                 .with_attached_deposit(1)
-                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
+                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(4))
                 .with_unused_gas_weight(0)
                 .do_transfer(
                     trace_path,
@@ -86,7 +69,7 @@ impl TokenTransferExecutionContext for TransferModule {
         );
         ext_token_factory::ext(utils::get_token_factory_contract_id())
             .with_attached_deposit(utils::STORAGE_DEPOSIT_FOR_MINT_TOKEN)
-            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 8)
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(8))
             .with_unused_gas_weight(0)
             .mint_asset(
                 amt.denom.trace_path.to_string(),
@@ -179,83 +162,5 @@ impl TokenTransferValidationContext for TransferModule {
         _coin: &PrefixedCoin,
     ) -> Result<(), TokenTransferError> {
         Ok(())
-    }
-}
-
-impl SendPacketValidationContext for TransferModule {
-    type ClientValidationContext = NearIbcStore;
-
-    type E = NearIbcStore;
-
-    type AnyConsensusState = AnyConsensusState;
-
-    type AnyClientState = AnyClientState;
-
-    fn channel_end(&self, channel_end_path: &ChannelEndPath) -> Result<ChannelEnd, ContextError> {
-        let store = Self::get_near_ibc_store();
-        ValidationContext::channel_end(&store, channel_end_path)
-    }
-
-    fn connection_end(&self, connection_id: &ConnectionId) -> Result<ConnectionEnd, ContextError> {
-        let store = Self::get_near_ibc_store();
-        ValidationContext::connection_end(&store, connection_id)
-    }
-
-    fn client_state(&self, client_id: &ClientId) -> Result<Self::AnyClientState, ContextError> {
-        let store = Self::get_near_ibc_store();
-        ValidationContext::client_state(&store, client_id)
-    }
-
-    fn client_consensus_state(
-        &self,
-        client_cons_state_path: &ClientConsensusStatePath,
-    ) -> Result<Self::AnyConsensusState, ContextError> {
-        let store = Self::get_near_ibc_store();
-        ValidationContext::consensus_state(&store, client_cons_state_path)
-    }
-
-    fn get_next_sequence_send(
-        &self,
-        seq_send_path: &SeqSendPath,
-    ) -> Result<Sequence, ContextError> {
-        let store = Self::get_near_ibc_store();
-        ValidationContext::get_next_sequence_send(&store, seq_send_path)
-    }
-}
-
-impl SendPacketExecutionContext for TransferModule {
-    fn store_packet_commitment(
-        &mut self,
-        commitment_path: &CommitmentPath,
-        commitment: PacketCommitment,
-    ) -> Result<(), ContextError> {
-        let mut store = Self::get_near_ibc_store();
-        let result =
-            ExecutionContext::store_packet_commitment(&mut store, commitment_path, commitment);
-        Self::set_near_ibc_store(&store);
-        result
-    }
-
-    fn store_next_sequence_send(
-        &mut self,
-        seq_send_path: &SeqSendPath,
-        seq: Sequence,
-    ) -> Result<(), ContextError> {
-        let mut store = Self::get_near_ibc_store();
-        let result = ExecutionContext::store_next_sequence_send(&mut store, seq_send_path, seq);
-        Self::set_near_ibc_store(&store);
-        result
-    }
-
-    fn emit_ibc_event(&mut self, event: ibc::core::events::IbcEvent) {
-        let mut store = Self::get_near_ibc_store();
-        ExecutionContext::emit_ibc_event(&mut store, event);
-        Self::set_near_ibc_store(&store);
-    }
-
-    fn log_message(&mut self, message: String) {
-        let mut store = Self::get_near_ibc_store();
-        ExecutionContext::log_message(&mut store, message);
-        Self::set_near_ibc_store(&store);
     }
 }

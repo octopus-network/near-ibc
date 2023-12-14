@@ -1,8 +1,8 @@
-FROM rust:1.65.0
+FROM rust:1.67.1
 
 LABEL description="Container for builds"
 
-RUN rustup default 1.65.0
+RUN rustup default 1.67.1
 RUN rustup target add wasm32-unknown-unknown
 RUN rustup component add rustfmt
 

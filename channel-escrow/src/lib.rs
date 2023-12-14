@@ -1,4 +1,3 @@
-#![no_std]
 #![deny(
     warnings,
     trivial_casts,
@@ -12,15 +11,14 @@ extern crate alloc;
 
 use alloc::{
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 use ibc::applications::transfer::PORT_ID_STR;
 use near_contract_standards::fungible_token::core::ext_ft_core;
 use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
+    borsh::{BorshDeserialize, BorshSerialize},
     env,
-    json_types::U128,
+    json_types::{U128, U64},
     near_bindgen,
     serde::{Deserialize, Serialize},
     serde_json,
@@ -36,6 +34,7 @@ use utils::{
 };
 
 #[derive(BorshSerialize, BorshStorageKey)]
+#[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
     TokenContracts,
     PendingTransferRequests,
@@ -45,6 +44,8 @@ pub enum StorageKey {
 #[serde(crate = "near_sdk::serde")]
 pub struct FtOnTransferMsg {
     pub receiver: String,
+    #[serde(default)]
+    pub timeout_seconds: Option<U64>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -56,6 +57,7 @@ pub struct RegisteredAsset {
 
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct Contract {
     /// The account id of IBC/TAO implementation.
     near_ibc_account: AccountId,
@@ -112,6 +114,7 @@ impl Contract {
             amount,
             sender: sender_id.to_string(),
             receiver: msg.receiver,
+            timeout_seconds: msg.timeout_seconds,
         };
         ext_transfer_request_handler::ext(self.near_ibc_account())
             .with_attached_deposit(0)
@@ -192,7 +195,7 @@ impl ChannelEscrow for Contract {
         let token_contract = maybe_existed_token_contract.unwrap();
         ext_ft_core::ext(token_contract.clone())
             .with_attached_deposit(1)
-            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 2)
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(2))
             .with_unused_gas_weight(0)
             .ft_transfer(receiver_id, amount.into(), None);
     }
@@ -251,7 +254,7 @@ impl ProcessTransferRequestCallback for Contract {
         let token_contract = maybe_existed_token_contract.unwrap();
         ext_ft_core::ext(token_contract.clone())
             .with_attached_deposit(1)
-            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 2)
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(2))
             .with_unused_gas_weight(0)
             .ft_transfer(sender_id, amount.into(), None);
     }

@@ -1,7 +1,6 @@
-use crate::{context::NearIbcStoreHost, prelude::*};
-use core::{fmt::Debug, str::FromStr};
+use crate::{prelude::*, StorageKey};
+use core::fmt::Debug;
 use ibc::{
-    applications::transfer::packet::PacketData,
     core::{
         ics04_channel::{
             acknowledgement::Acknowledgement,
@@ -15,23 +14,33 @@ use ibc::{
     },
     Signer,
 };
-use ibc_proto::ibc::apps::transfer::v2::FungibleTokenPacketData;
 use near_sdk::{
     borsh::{BorshDeserialize, BorshSerialize},
-    log, serde_json, AccountId,
+    log, serde_json,
+    store::UnorderedMap,
+    AccountId,
 };
+use octopus_lpos::{packet::consumer::ConsumerPacket, ConsumerChainId};
 
 pub mod impls;
 
-pub struct AccountIdConversion(AccountId);
-
 #[derive(BorshDeserialize, BorshSerialize, Debug)]
 #[borsh(crate = "near_sdk::borsh")]
-pub struct TransferModule();
+pub struct OctopusLposModule {
+    pub chain_id_channel_map: UnorderedMap<ConsumerChainId, ChannelId>,
+    pub appchain_registry_account: AccountId,
+}
 
-impl NearIbcStoreHost for TransferModule {}
+impl OctopusLposModule {
+    pub fn new(appchain_registry_account: AccountId) -> Self {
+        Self {
+            chain_id_channel_map: UnorderedMap::new(StorageKey::ChainIdChannelMap),
+            appchain_registry_account,
+        }
+    }
+}
 
-impl Module for TransferModule {
+impl Module for OctopusLposModule {
     fn on_chan_open_init_validate(
         &self,
         order: Order,
@@ -41,7 +50,7 @@ impl Module for TransferModule {
         counterparty: &Counterparty,
         version: &Version,
     ) -> Result<Version, ChannelError> {
-        ibc::applications::transfer::context::on_chan_open_init_validate(
+        octopus_lpos::context::on_chan_open_init_validate(
             self,
             order,
             connection_hops,
@@ -65,7 +74,7 @@ impl Module for TransferModule {
         counterparty: &Counterparty,
         counterparty_version: &Version,
     ) -> Result<Version, ChannelError> {
-        ibc::applications::transfer::context::on_chan_open_try_validate(
+        octopus_lpos::context::on_chan_open_try_validate(
             self,
             order,
             connection_hops,
@@ -86,7 +95,7 @@ impl Module for TransferModule {
         channel_id: &ChannelId,
         counterparty_version: &Version,
     ) -> Result<(), ChannelError> {
-        ibc::applications::transfer::context::on_chan_open_ack_validate(
+        octopus_lpos::context::on_chan_open_ack_validate(
             self,
             port_id,
             channel_id,
@@ -102,15 +111,11 @@ impl Module for TransferModule {
         port_id: &PortId,
         channel_id: &ChannelId,
     ) -> Result<(), ChannelError> {
-        // Create and initialize the escrow sub-account for this channel.
-
-        // Call default implementation.
-        ibc::applications::transfer::context::on_chan_open_confirm_validate(
-            self, port_id, channel_id,
+        octopus_lpos::context::on_chan_open_confirm_validate(self, port_id, channel_id).map_err(
+            |e| ChannelError::AppModule {
+                description: e.to_string(),
+            },
         )
-        .map_err(|e| ChannelError::AppModule {
-            description: e.to_string(),
-        })
     }
 
     fn on_chan_close_init_validate(
@@ -118,10 +123,11 @@ impl Module for TransferModule {
         port_id: &PortId,
         channel_id: &ChannelId,
     ) -> Result<(), ChannelError> {
-        ibc::applications::transfer::context::on_chan_close_init_validate(self, port_id, channel_id)
-            .map_err(|e| ChannelError::AppModule {
+        octopus_lpos::context::on_chan_close_init_validate(self, port_id, channel_id).map_err(|e| {
+            ChannelError::AppModule {
                 description: e.to_string(),
-            })
+            }
+        })
     }
 
     fn on_chan_close_confirm_validate(
@@ -129,12 +135,11 @@ impl Module for TransferModule {
         port_id: &PortId,
         channel_id: &ChannelId,
     ) -> Result<(), ChannelError> {
-        ibc::applications::transfer::context::on_chan_close_confirm_validate(
-            self, port_id, channel_id,
+        octopus_lpos::context::on_chan_close_confirm_validate(self, port_id, channel_id).map_err(
+            |e| ChannelError::AppModule {
+                description: e.to_string(),
+            },
         )
-        .map_err(|e| ChannelError::AppModule {
-            description: e.to_string(),
-        })
     }
 
     fn on_recv_packet_execute(
@@ -146,18 +151,16 @@ impl Module for TransferModule {
             "Received packet: {:?}",
             String::from_utf8(packet.data.to_vec()).expect("Invalid packet data")
         );
-        let ft_packet_data = serde_json::from_slice::<FungibleTokenPacketData>(&packet.data)
-            .expect("Invalid packet data");
-        let maybe_ft_packet = Packet {
-            data: serde_json::to_string(
-                &PacketData::try_from(ft_packet_data).expect("Invalid packet data"),
-            )
-            .expect("Invalid packet data")
-            .into_bytes(),
+        let consumer_packet =
+            serde_json::from_slice::<ConsumerPacket>(&packet.data).expect("Invalid packet data");
+        let maybe_consumer_packet = Packet {
+            data: serde_json::to_string(&consumer_packet)
+                .expect("Invalid packet data")
+                .into_bytes(),
             ..packet.clone()
         };
         let (extras, ack) =
-            ibc::applications::transfer::context::on_recv_packet_execute(self, &maybe_ft_packet);
+            octopus_lpos::context::on_recv_packet_execute(self, &maybe_consumer_packet);
         let ack_status =
             String::from_utf8(ack.as_bytes().to_vec()).expect("Invalid acknowledgement string");
         log!("Packet acknowledgement: {}", ack_status);
@@ -170,7 +173,7 @@ impl Module for TransferModule {
         acknowledgement: &Acknowledgement,
         relayer: &Signer,
     ) -> Result<(), PacketError> {
-        ibc::applications::transfer::context::on_acknowledgement_packet_validate(
+        octopus_lpos::context::on_acknowledgement_packet_validate(
             self,
             packet,
             acknowledgement,
@@ -186,10 +189,11 @@ impl Module for TransferModule {
         packet: &Packet,
         relayer: &Signer,
     ) -> Result<(), PacketError> {
-        ibc::applications::transfer::context::on_timeout_packet_validate(self, packet, relayer)
-            .map_err(|e| PacketError::AppModule {
+        octopus_lpos::context::on_timeout_packet_validate(self, packet, relayer).map_err(|e| {
+            PacketError::AppModule {
                 description: e.to_string(),
-            })
+            }
+        })
     }
 
     fn on_chan_open_init_execute(
@@ -201,7 +205,7 @@ impl Module for TransferModule {
         counterparty: &Counterparty,
         version: &Version,
     ) -> Result<(ModuleExtras, Version), ChannelError> {
-        ibc::applications::transfer::context::on_chan_open_init_execute(
+        octopus_lpos::context::on_chan_open_init_execute(
             self,
             order,
             connection_hops,
@@ -224,7 +228,7 @@ impl Module for TransferModule {
         counterparty: &Counterparty,
         counterparty_version: &Version,
     ) -> Result<(ModuleExtras, Version), ChannelError> {
-        ibc::applications::transfer::context::on_chan_open_try_execute(
+        octopus_lpos::context::on_chan_open_try_execute(
             self,
             order,
             connection_hops,
@@ -244,7 +248,7 @@ impl Module for TransferModule {
         acknowledgement: &Acknowledgement,
         relayer: &Signer,
     ) -> (ModuleExtras, Result<(), PacketError>) {
-        let result = ibc::applications::transfer::context::on_acknowledgement_packet_execute(
+        let result = octopus_lpos::context::on_acknowledgement_packet_execute(
             self,
             packet,
             acknowledgement,
@@ -263,23 +267,12 @@ impl Module for TransferModule {
         packet: &Packet,
         relayer: &Signer,
     ) -> (ModuleExtras, Result<(), PacketError>) {
-        let result =
-            ibc::applications::transfer::context::on_timeout_packet_execute(self, packet, relayer);
+        let result = octopus_lpos::context::on_timeout_packet_execute(self, packet, relayer);
         (
             result.0,
             result.1.map_err(|e| PacketError::AppModule {
                 description: e.to_string(),
             }),
         )
-    }
-}
-
-impl TryFrom<Signer> for AccountIdConversion {
-    type Error = &'static str;
-
-    fn try_from(value: Signer) -> Result<Self, Self::Error> {
-        Ok(AccountIdConversion(
-            AccountId::from_str(value.as_ref()).map_err(|_| "invalid signer")?,
-        ))
     }
 }

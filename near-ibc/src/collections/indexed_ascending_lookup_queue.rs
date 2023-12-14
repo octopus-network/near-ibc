@@ -1,6 +1,6 @@
-use crate::{types::ProcessingResult, *};
-
 use super::IndexedAscendingQueueViewer;
+use crate::{types::ProcessingResult, *};
+use core::fmt::Debug;
 
 /// A indexed ascending lookup queue.
 ///
@@ -13,6 +13,7 @@ use super::IndexedAscendingQueueViewer;
 /// when remove them from the queue, the extra storage usage will not be released.
 ///
 #[derive(BorshDeserialize, BorshSerialize)]
+#[borsh(crate = "near_sdk::borsh")]
 pub struct IndexedAscendingLookupQueue<K, V>
 where
     K: BorshDeserialize + BorshSerialize + Clone + Ord,
@@ -37,8 +38,8 @@ where
 /// Implement change functions for `IndexedLookupQueue`.
 impl<K, V> IndexedAscendingLookupQueue<K, V>
 where
-    K: BorshDeserialize + BorshSerialize + Clone + Ord,
-    V: BorshDeserialize + BorshSerialize + Clone,
+    K: BorshDeserialize + BorshSerialize + Clone + Ord + Debug,
+    V: BorshDeserialize + BorshSerialize + Clone + Debug,
 {
     ///
     pub fn new(
@@ -88,10 +89,18 @@ where
     /// Add a new element to the queue.
     /// If the queue reaches max length, the oldest (first) element will be removed.
     pub fn push_back(&mut self, element: (K, V)) {
-        assert!(
-            self.end_index == 0 || &element.0 > self.index_map.get(&self.end_index).unwrap(),
-            "The key to be added should be larger than the latest key in the queue."
-        );
+        if !(self.end_index == 0 || &element.0 > self.index_map.get(&self.end_index).unwrap()) {
+            log!(
+                "Maybe invalid element to add, key: {:?}, value: {:?}. \
+                The key to be added should be larger than the latest key in the queue. \
+                Current index range of queue: {} - {}, latest key in queue: {:?}",
+                element.0,
+                element.1,
+                self.start_index,
+                self.end_index,
+                self.index_map.get(&self.end_index).unwrap()
+            );
+        };
         self.index_map.insert(self.end_index + 1, element.0.clone());
         self.value_map.insert(element.0, element.1);
         if self.start_index == 0 && self.end_index == 0 {
@@ -113,7 +122,7 @@ where
     /// Set max length of the queue.
     pub fn set_max_length(&mut self, max_length: u64) -> ProcessingResult {
         self.max_length = max_length;
-        let max_gas = env::prepaid_gas() * 4 / 5;
+        let max_gas = env::prepaid_gas().saturating_mul(4).saturating_div(5);
         while self.end_index - self.start_index + 1 > self.max_length {
             self.pop_front();
             self.flush();
@@ -129,32 +138,37 @@ where
         ProcessingResult::Ok
     }
     /// Clear the queue.
-    pub fn clear(&mut self) -> ProcessingResult {
-        let max_gas = env::prepaid_gas() * 4 / 5;
+    pub fn clear(&mut self, lt_key: Option<&K>) -> ProcessingResult {
+        let max_gas = env::prepaid_gas().saturating_mul(4).saturating_div(5);
         for index in self.start_index..self.end_index + 1 {
             if let Some(key) = self.index_map.get(&index) {
+                if lt_key.is_some() && key.ge(lt_key.unwrap()) {
+                    break;
+                }
                 env::storage_remove(
                     migration::get_storage_key_of_lookup_map(
                         &self.index_map_storage_key_prefix,
-                        &key,
+                        &index,
                     )
                     .as_slice(),
                 );
                 env::storage_remove(
                     migration::get_storage_key_of_lookup_map(
                         &self.value_map_storage_key_prefix,
-                        &index,
+                        &key,
                     )
                     .as_slice(),
                 );
             }
+            self.start_index = index + 1;
             if env::used_gas() >= max_gas {
-                self.start_index = index + 1;
                 return ProcessingResult::NeedMoreGas;
             }
         }
-        self.start_index = 0;
-        self.end_index = 0;
+        if self.start_index > self.end_index {
+            self.start_index = 0;
+            self.end_index = 0;
+        }
         ProcessingResult::Ok
     }
     /// Flush lookup map to storage.

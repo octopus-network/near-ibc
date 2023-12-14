@@ -1,4 +1,3 @@
-#![no_std]
 #![deny(
     warnings,
     trivial_casts,
@@ -16,8 +15,8 @@ use crate::{context::NearIbcStore, ibc_impl::applications::transfer::TransferMod
 use core::str::FromStr;
 use ibc::{
     applications::transfer::{
-        msgs::transfer::MsgTransfer, packet::PacketData, send_transfer, Amount, BaseDenom, Memo,
-        PrefixedCoin, PrefixedDenom, TracePath,
+        msgs::transfer::MsgTransfer, packet::PacketData, Amount, BaseDenom, Memo, PrefixedCoin,
+        PrefixedDenom, TracePath,
     },
     core::{
         ics04_channel::timeout::TimeoutHeight,
@@ -28,6 +27,7 @@ use ibc::{
     Height, Signer,
 };
 use ibc_proto::google::protobuf::Any;
+use module_holder::ModuleHolder;
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
@@ -40,7 +40,8 @@ use near_sdk::{
     store::LookupMap,
     AccountId, BorshStorageKey, PanicOnDefault,
 };
-use types::ProcessingResult;
+use octopus_lpos::msgs::MsgValidatorSetChange;
+use types::*;
 use utils::{
     interfaces::{
         ext_channel_escrow, ext_escrow_factory, ext_process_transfer_request_callback,
@@ -53,6 +54,7 @@ use utils::{
 mod collections;
 mod context;
 mod events;
+mod ext_interfaces;
 mod ibc_impl;
 pub mod migration;
 mod module_holder;
@@ -61,9 +63,12 @@ mod testnet_functions;
 pub mod types;
 pub mod viewer;
 
-pub const VERSION: &str = "v1.0.0-pre.4";
+pub const VERSION: &str = "v1.2.0-pre.0";
+/// The default timeout seconds for the `MsgTransfer` message.
+pub const DEFAULT_TIMEOUT_SECONDS: u64 = 1000;
 
-#[derive(BorshDeserialize, BorshSerialize, BorshStorageKey, Clone)]
+#[derive(BorshDeserialize, BorshSerialize, BorshStorageKey, Clone, Debug)]
+#[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
     NearIbcStore,
     PortToModule,
@@ -105,24 +110,29 @@ pub enum StorageKey {
     },
     IbcEventsHistoryIndexMap,
     IbcEventsHistoryValueMap,
+    ChainIdChannelMap,
 }
 
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
-pub struct Contract {
+#[borsh(crate = "near_sdk::borsh")]
+pub struct NearIbcContract {
     near_ibc_store: LazyOption<NearIbcStore>,
+    /// To support the mutable borrow in `Router::get_route_mut`.
+    module_holder: ModuleHolder,
     governance_account: AccountId,
 }
 
 #[near_bindgen]
-impl Contract {
+impl NearIbcContract {
     #[private]
     #[init]
-    pub fn init() -> Self {
+    pub fn init(appchain_registry_account: AccountId) -> Self {
         env::storage_write("version".as_bytes(), VERSION.as_bytes());
         Self {
             near_ibc_store: LazyOption::new(StorageKey::NearIbcStore, Some(&NearIbcStore::new())),
             governance_account: env::current_account_id(),
+            module_holder: ModuleHolder::new(appchain_registry_account),
         }
     }
     ///
@@ -140,17 +150,25 @@ impl Contract {
         let mut near_ibc_store = self.near_ibc_store.get().unwrap();
 
         let errors = messages.into_iter().fold(vec![], |mut errors, msg| {
-            match MsgEnvelope::try_from(msg) {
-                Ok(msg) => match ibc::core::dispatch(&mut near_ibc_store, msg) {
+            match MsgEnvelope::try_from(msg.clone()) {
+                Ok(msg) => match ibc::core::dispatch(&mut near_ibc_store, self, msg.clone()) {
                     Ok(()) => (),
-                    Err(e) => errors.push(e),
+                    Err(e) => {
+                        log!("Error occurred in processing message: {:?}, {:?}", msg, e);
+                        errors.push(e)
+                    }
                 },
-                Err(e) => errors.push(e),
+                Err(e) => {
+                    log!("Error occurred in routing message: {:?}, {:?}", msg, e);
+                    errors.push(e)
+                }
             }
             errors
         });
         if errors.len() > 0 {
-            log!("Error(s) occurred: {:?}", errors);
+            log!(
+                r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0","event":"ERR_DELIVER_MESSAGE"}}"#,
+            );
         }
         near_ibc_store.flush();
         self.near_ibc_store.set(&near_ibc_store);
@@ -191,7 +209,7 @@ impl Contract {
         };
         let minimum_deposit = utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT
             + env::storage_byte_cost()
-                * (32 + cross_chain_asset.try_to_vec().unwrap().len()) as u128;
+                * (32 + borsh::to_vec(&cross_chain_asset).unwrap().len()) as u128;
         assert!(
             env::attached_deposit() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
@@ -202,7 +220,9 @@ impl Contract {
         ext_token_factory::ext(utils::get_token_factory_contract_id())
             .with_attached_deposit(minimum_deposit)
             .with_static_gas(
-                utils::GAS_FOR_COMPLEX_FUNCTION_CALL - utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
+                utils::GAS_FOR_COMPLEX_FUNCTION_CALL
+                    .checked_sub(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                    .unwrap(),
             )
             .with_unused_gas_weight(0)
             .setup_asset(asset_denom.trace_path, asset_denom.base_denom, metadata);
@@ -230,7 +250,7 @@ impl Contract {
             "ERR_NOT_ENOUGH_GAS"
         );
         let minimum_deposit = utils::INIT_BALANCE_FOR_CHANNEL_ESCROW_CONTRACT
-            + env::storage_byte_cost() * (channel_id.try_to_vec().unwrap().len() + 16) as u128;
+            + env::storage_byte_cost() * (borsh::to_vec(&channel_id).unwrap().len() + 16) as u128;
         assert!(
             env::attached_deposit() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
@@ -241,7 +261,9 @@ impl Contract {
         ext_escrow_factory::ext(utils::get_escrow_factory_contract_id())
             .with_attached_deposit(minimum_deposit)
             .with_static_gas(
-                utils::GAS_FOR_COMPLEX_FUNCTION_CALL - utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
+                utils::GAS_FOR_COMPLEX_FUNCTION_CALL
+                    .checked_sub(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                    .unwrap(),
             )
             .with_unused_gas_weight(0)
             .create_escrow(ChannelId::from_str(channel_id.as_str()).unwrap());
@@ -272,7 +294,8 @@ impl Contract {
             base_denom,
         };
         let minimum_deposit = env::storage_byte_cost()
-            * (asset_denom.try_to_vec().unwrap().len() + token_contract.to_string().len()) as u128;
+            * (borsh::to_vec(&asset_denom).unwrap().len() + token_contract.to_string().len())
+                as u128;
         assert!(
             env::attached_deposit() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
@@ -289,61 +312,6 @@ impl Contract {
             .register_asset(asset_denom.base_denom, token_contract);
         ExtraDepositCost::add(minimum_deposit);
         utils::refund_deposit(used_bytes);
-    }
-}
-
-#[near_bindgen]
-impl TransferRequestHandler for Contract {
-    fn process_transfer_request(&mut self, transfer_request: Ics20TransferRequest) {
-        utils::assert_sub_account();
-        if let Err(e) = send_transfer(
-            &mut TransferModule(),
-            MsgTransfer {
-                port_id_on_a: PortId::from_str(transfer_request.port_on_a.as_str()).unwrap(),
-                chan_id_on_a: ChannelId::from_str(transfer_request.chan_on_a.as_str()).unwrap(),
-                packet_data: PacketData {
-                    token: PrefixedCoin {
-                        denom: PrefixedDenom {
-                            trace_path: TracePath::from_str(
-                                transfer_request.token_trace_path.as_str(),
-                            )
-                            .unwrap(),
-                            base_denom: BaseDenom::from_str(transfer_request.token_denom.as_str())
-                                .unwrap(),
-                        },
-                        amount: Amount::from_str(transfer_request.amount.0.to_string().as_str())
-                            .unwrap(),
-                    },
-                    sender: Signer::from(transfer_request.sender.clone()),
-                    receiver: Signer::from(transfer_request.receiver.clone()),
-                    memo: Memo::from_str("").unwrap(),
-                },
-                timeout_height_on_b: TimeoutHeight::Never {},
-                timeout_timestamp_on_b: Timestamp::from_nanoseconds(
-                    env::block_timestamp() + 1000 * 1000000000,
-                )
-                .unwrap(),
-            },
-        ) {
-            log!("ERR_SEND_TRANSFER: {:?}", e);
-            log!(
-                "Cancelling transfer request for account {}, trace path {}, base denom {} with amount {}",
-                transfer_request.sender,
-                transfer_request.token_trace_path,
-                transfer_request.token_denom,
-                transfer_request.amount.0
-            );
-            ext_process_transfer_request_callback::ext(env::predecessor_account_id())
-                .with_attached_deposit(0)
-                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
-                .with_unused_gas_weight(0)
-                .cancel_transfer_request(
-                    transfer_request.token_trace_path,
-                    transfer_request.token_denom,
-                    AccountId::from_str(transfer_request.sender.as_str()).unwrap(),
-                    transfer_request.amount,
-                );
-        }
     }
 }
 
@@ -367,30 +335,6 @@ impl TryInto<PrefixedCoin> for TransferringCoins {
             amount: Amount::from_str(&self.amount.as_str())
                 .map_err(|_| "ERR_INVALID_AMOUNT".to_string())?,
         })
-    }
-}
-
-/// Some sudo functions for testing.
-#[near_bindgen]
-impl Contract {
-    pub fn cancel_transfer_request_in_channel_escrow(
-        &mut self,
-        channel_id: String,
-        trace_path: String,
-        base_denom: String,
-        sender_id: AccountId,
-        amount: U128,
-    ) {
-        self.assert_governance();
-        let channel_escrow_id =
-            format!("{}.{}", channel_id, utils::get_escrow_factory_contract_id());
-        ext_process_transfer_request_callback::ext(
-            AccountId::from_str(channel_escrow_id.as_str()).unwrap(),
-        )
-        .with_attached_deposit(0)
-        .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL * 4)
-        .with_unused_gas_weight(0)
-        .cancel_transfer_request(trace_path, base_denom, sender_id, amount);
     }
 }
 

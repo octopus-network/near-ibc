@@ -6,7 +6,10 @@ use ibc::{
     },
     Height,
 };
-use near_sdk::serde::{Deserialize, Serialize};
+use near_sdk::{
+    json_types::U64,
+    serde::{Deserialize, Serialize},
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
@@ -40,4 +43,19 @@ pub enum ProcessingResult {
     NeedMoreGas,
     Ok,
     Error(String),
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ValidatorKeyAndPower {
+    pub public_key: Vec<u8>,
+    pub power: U64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct VscPacketData {
+    pub validator_pubkeys: Vec<ValidatorKeyAndPower>,
+    pub validator_set_id: U64,
+    pub slash_acks: Vec<Vec<u8>>,
 }

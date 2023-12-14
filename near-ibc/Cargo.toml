@@ -7,14 +7,18 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-near-sdk = "4.1.0"
-near-contract-standards = "4.1.0"
-ibc = { version = "0.42.0", default-features = false, features = ["borsh", "serde"]}
-ibc-proto = { version = "0.32.0", default-features = false }
+# near-sdk = "4.1.0"
+near-sdk = { git = "https://github.com/near/near-sdk-rs", branch = "master" }
+# near-contract-standards = "4.1.0"
+near-contract-standards = { git = "https://github.com/near/near-sdk-rs", branch = "master" }
+ibc = { version = "0.45.0", default-features = false, features = ["borsh", "serde"]}
+ibc-proto = { version = "0.35.0", default-features = false, features = ["serde"] }
 sha2 = { version = "0.10.6", default-features = false }
 itertools = "0.10.5"
 serde = "1.0"
 getrandom = { version = "0.2", features = ["custom"] }
 token-factory = { path = "../token-factory" }
 utils = { path = "../utils" }
-ics06-solomachine = { git = "https://github.com/octopus-network/ics06-solomachine.git", branch = "octopus-relayer-ibcv0.42.0" }
+tendermint = { version = "0.33" }
+hex = "0.4"
+octopus-lpos = { git = "https://github.com/octopus-network/octopus-lpos-ibc.git", branch = "main" }
