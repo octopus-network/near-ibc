@@ -1854,7 +1854,7 @@ dependencies = [
 [[package]]
 name = "octopus-lpos"
 version = "0.1.0"
-source = "git+https://github.com/octopus-network/octopus-lpos-ibc.git?branch=main#b5328d2c8edb2cde278ab793f0e30995ab7c824c"
+source = "git+https://github.com/octopus-network/octopus-lpos-ibc.git?branch=main#a73a14cd1d00d9b3587a6a76429f8a21504b3f78"
 dependencies = [
  "base64 0.21.5",
  "displaydoc",
