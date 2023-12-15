@@ -114,15 +114,13 @@ where
     pub fn clear(&mut self) -> ProcessingResult {
         let max_gas = env::prepaid_gas().saturating_mul(4).saturating_div(5);
         for index in self.start_index..self.end_index + 1 {
-            if let Some(key) = self.index_map.get(&index) {
-                env::storage_remove(
-                    migration::get_storage_key_of_lookup_map(
-                        &self.index_map_storage_key_prefix,
-                        &key,
-                    )
-                    .as_slice(),
-                );
-            }
+            env::storage_remove(
+                migration::get_storage_key_of_lookup_map(
+                    &self.index_map_storage_key_prefix,
+                    &index,
+                )
+                .as_slice(),
+            );
             if env::used_gas() >= max_gas {
                 self.start_index = index + 1;
                 return ProcessingResult::NeedMoreGas;
