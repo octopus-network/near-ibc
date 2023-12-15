@@ -5,7 +5,7 @@ use near_sdk::{
     json_types::{Base58CryptoHash, U128},
     log, near_bindgen,
     serde::{Deserialize, Serialize},
-    store::UnorderedMap,
+    store::{LookupMap, UnorderedMap},
     AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise, PromiseResult,
 };
 use utils::{
@@ -14,18 +14,24 @@ use utils::{
     ExtraDepositCost,
 };
 
+mod migration;
+
 #[derive(BorshSerialize, BorshStorageKey)]
 #[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
     TokenContractWasm,
     AssetIdMappings,
+    DenomToAssetIdMap,
 }
 
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
 #[borsh(crate = "near_sdk::borsh")]
 pub struct Contract {
+    /// Maps asset id to cross chain asset.
     asset_id_mappings: UnorderedMap<String, CrossChainAsset>,
+    /// Maps asset denom to asset id.
+    denom_to_asset_id_map: LookupMap<AssetDenom, String>,
 }
 
 #[near_bindgen]
@@ -40,6 +46,7 @@ impl Contract {
         );
         Self {
             asset_id_mappings: UnorderedMap::new(StorageKey::AssetIdMappings),
+            denom_to_asset_id_map: LookupMap::new(StorageKey::DenomToAssetIdMap),
         }
     }
     ///
@@ -156,14 +163,14 @@ impl TokenFactory for Contract {
             trace_path,
             base_denom,
         };
-        let maybe_asset = self
-            .asset_id_mappings
-            .iter()
-            .find(|asset| asset.1.asset_denom == asset_denom);
-        assert!(maybe_asset.is_some(), "ERR_ASSET_NEEDS_TO_BE_SETUP");
+        let maybe_asset_id = self
+            .denom_to_asset_id_map
+            .get(&asset_denom)
+            .map(|v| v.clone());
+        assert!(maybe_asset_id.is_some(), "ERR_ASSET_NEEDS_TO_BE_SETUP");
         // Mint tokens.
         let token_contract_id: AccountId =
-            format!("{}.{}", maybe_asset.unwrap().0, env::current_account_id())
+            format!("{}.{}", maybe_asset_id.unwrap(), env::current_account_id())
                 .parse()
                 .unwrap();
         ext_wrapped_token::ext(token_contract_id.clone())
@@ -172,12 +179,15 @@ impl TokenFactory for Contract {
             .with_unused_gas_weight(0)
             .mint(token_owner.clone(), amount)
             .then(
-                ext_mint_callback::ext(env::current_account_id()).mint_callback(
-                    asset_denom.to_string(),
-                    token_contract_id,
-                    token_owner,
-                    amount,
-                ),
+                ext_mint_callback::ext(env::current_account_id())
+                    .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                    .with_unused_gas_weight(0)
+                    .mint_callback(
+                        asset_denom.to_string(),
+                        token_contract_id,
+                        token_owner,
+                        amount,
+                    ),
             );
     }
 }
@@ -206,9 +216,7 @@ impl MintCallback for Contract {
         match env::promise_result(0) {
             PromiseResult::Successful(_bytes) => {
                 log!(
-                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0",\
-                    "event":"MINT_SUCCEEDED","denom":"{}","token_contract":"{}",\
-                    "token_owner":"{}","amount":"{}"}}"#,
+                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0","event":"MINT_SUCCEEDED","denom":"{}","token_contract":"{}","token_owner":"{}","amount":"{}"}}"#,
                     denom,
                     token_contract,
                     token_owner,
@@ -217,9 +225,7 @@ impl MintCallback for Contract {
             }
             PromiseResult::Failed => {
                 log!(
-                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0",\
-                    "event":"ERR_MINT","denom":"{}","token_contract":"{}",\
-                    "receiver_id":"{}","amount":"{}"}}"#,
+                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0","event":"ERR_MINT","denom":"{}","token_contract":"{}","receiver_id":"{}","amount":"{}"}}"#,
                     denom,
                     token_contract,
                     token_owner,

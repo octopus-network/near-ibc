@@ -22,7 +22,7 @@ use near_sdk::{
     log, near_bindgen,
     serde::{Deserialize, Serialize},
     serde_json,
-    store::UnorderedMap,
+    store::{LookupMap, UnorderedMap},
     AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise, PromiseOrValue, PromiseResult,
 };
 use utils::{
@@ -33,11 +33,14 @@ use utils::{
     types::{AssetDenom, Ics20TransferRequest},
 };
 
+mod migration;
+
 #[derive(BorshSerialize, BorshStorageKey)]
 #[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
     TokenContracts,
     PendingTransferRequests,
+    DenomToTokenContractMap,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -65,6 +68,8 @@ pub struct Contract {
     token_contracts: UnorderedMap<AccountId, AssetDenom>,
     /// Accounting for the pending transfer requests.
     pending_transfer_requests: UnorderedMap<AccountId, Ics20TransferRequest>,
+    /// The mapping from the asset denom to the token contract account id.
+    denom_to_token_contract_map: LookupMap<AssetDenom, AccountId>,
 }
 
 #[near_bindgen]
@@ -81,6 +86,7 @@ impl Contract {
             near_ibc_account,
             token_contracts: UnorderedMap::new(StorageKey::TokenContracts),
             pending_transfer_requests: UnorderedMap::new(StorageKey::PendingTransferRequests),
+            denom_to_token_contract_map: LookupMap::new(StorageKey::DenomToTokenContractMap),
         }
     }
     /// Callback function for `ft_transfer_call` of NEP-141 compatible contracts
@@ -147,13 +153,6 @@ impl Contract {
         );
         self.pending_transfer_requests.remove(account_id);
     }
-    // Get token contract account id corresponding to the asset denom.
-    fn get_token_contract_by_asset_denom(&self, asset_denom: &AssetDenom) -> Option<AccountId> {
-        self.token_contracts
-            .iter()
-            .find(|(_, value)| *value == asset_denom)
-            .map(|(id, _)| id.clone())
-    }
 }
 
 #[ext_contract(ext_ft_transfer_callback)]
@@ -178,9 +177,7 @@ impl FtTransferCallback for Contract {
         match env::promise_result(0) {
             PromiseResult::Successful(_bytes) => {
                 log!(
-                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0",\
-                    "event":"FT_TRANSFER_SUCCEEDED","token_contract":"{}","receiver_id":"{}",\
-                    "amount":"{}"}}"#,
+                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0","event":"FT_TRANSFER_SUCCEEDED","token_contract":"{}","receiver_id":"{}","amount":"{}"}}"#,
                     token_contract,
                     receiver_id,
                     amount.0,
@@ -188,9 +185,7 @@ impl FtTransferCallback for Contract {
             }
             PromiseResult::Failed => {
                 log!(
-                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0",\
-                    "event":"ERR_FT_TRANSFER","token_contract":"{}","receiver_id":"{}",\
-                    "amount":"{}"}}"#,
+                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0","event":"ERR_FT_TRANSFER","token_contract":"{}","receiver_id":"{}","amount":"{}"}}"#,
                     token_contract,
                     receiver_id,
                     amount.0,
@@ -209,12 +204,15 @@ impl ChannelEscrow for Contract {
             trace_path: String::new(),
             base_denom,
         };
-        let maybe_existed_token_contract = self.get_token_contract_by_asset_denom(&asset_denom);
+        let maybe_existed_token_contract = self.denom_to_token_contract_map.get(&asset_denom);
         assert!(
             maybe_existed_token_contract.is_none(),
             "ERR_TOKEN_CONTRACT_ALREADY_REGISTERED"
         );
-        self.token_contracts.insert(token_contract, asset_denom);
+        self.token_contracts
+            .insert(token_contract.clone(), asset_denom.clone());
+        self.denom_to_token_contract_map
+            .insert(asset_denom, token_contract);
     }
 
     #[payable]
@@ -230,7 +228,7 @@ impl ChannelEscrow for Contract {
             trace_path,
             base_denom,
         };
-        let maybe_existed_token_contract = self.get_token_contract_by_asset_denom(&asset_denom);
+        let maybe_existed_token_contract = self.denom_to_token_contract_map.get(&asset_denom);
         assert!(
             maybe_existed_token_contract.is_some(),
             "ERR_INVALID_TOKEN_DENOM"
@@ -243,11 +241,10 @@ impl ChannelEscrow for Contract {
             .with_unused_gas_weight(0)
             .ft_transfer(receiver_id.clone(), amount, None)
             .then(
-                ext_ft_transfer_callback::ext(env::current_account_id()).ft_transfer_callback(
-                    token_contract,
-                    receiver_id,
-                    amount,
-                ),
+                ext_ft_transfer_callback::ext(env::current_account_id())
+                    .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                    .with_unused_gas_weight(0)
+                    .ft_transfer_callback(token_contract.clone(), receiver_id, amount),
             );
     }
 }
@@ -266,7 +263,10 @@ impl ProcessTransferRequestCallback for Contract {
             trace_path,
             base_denom,
         };
-        let maybe_existed_token_contract = self.get_token_contract_by_asset_denom(&asset_denom);
+        let maybe_existed_token_contract = self
+            .denom_to_token_contract_map
+            .get(&asset_denom)
+            .map(|v| v.clone());
         assert!(
             maybe_existed_token_contract.is_some(),
             "ERR_INVALID_TOKEN_DENOM"
@@ -291,7 +291,10 @@ impl ProcessTransferRequestCallback for Contract {
             trace_path,
             base_denom,
         };
-        let maybe_existed_token_contract = self.get_token_contract_by_asset_denom(&asset_denom);
+        let maybe_existed_token_contract = self
+            .denom_to_token_contract_map
+            .get(&asset_denom)
+            .map(|v| v.clone());
         assert!(
             maybe_existed_token_contract.is_some(),
             "ERR_INVALID_TOKEN_DENOM"

@@ -29,7 +29,7 @@ impl TokenTransferExecutionContext for TransferModule {
         if receiver_id.ends_with(prefixed_ef.as_str()) {
             ext_process_transfer_request_callback::ext(to.0.clone())
                 .with_attached_deposit(NearToken::from_yoctonear(0))
-                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(2))
                 .with_unused_gas_weight(0)
                 .apply_transfer_request(
                     trace_path,
@@ -40,7 +40,7 @@ impl TokenTransferExecutionContext for TransferModule {
         } else if sender_id.ends_with(prefixed_ef.as_str()) {
             ext_channel_escrow::ext(from.0.clone())
                 .with_attached_deposit(NearToken::from_yoctonear(1))
-                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(4))
+                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(5))
                 .with_unused_gas_weight(0)
                 .do_transfer(
                     trace_path,
@@ -70,7 +70,7 @@ impl TokenTransferExecutionContext for TransferModule {
             .with_attached_deposit(NearToken::from_yoctonear(
                 utils::STORAGE_DEPOSIT_FOR_MINT_TOKEN,
             ))
-            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(8))
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(6))
             .with_unused_gas_weight(0)
             .mint_asset(
                 amt.denom.trace_path.to_string(),
@@ -95,7 +95,7 @@ impl TokenTransferExecutionContext for TransferModule {
         );
         ext_process_transfer_request_callback::ext(env::predecessor_account_id())
             .with_attached_deposit(NearToken::from_yoctonear(0))
-            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(2))
             .with_unused_gas_weight(0)
             .apply_transfer_request(
                 amt.denom.trace_path.to_string(),
