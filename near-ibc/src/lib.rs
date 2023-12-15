@@ -59,6 +59,7 @@ mod ibc_impl;
 pub mod migration;
 mod module_holder;
 mod prelude;
+mod sudo_functions;
 mod testnet_functions;
 pub mod types;
 pub mod viewer;
