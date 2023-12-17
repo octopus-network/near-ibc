@@ -175,7 +175,7 @@ impl TokenFactory for Contract {
                 .unwrap();
         ext_wrapped_token::ext(token_contract_id.clone())
             .with_attached_deposit(env::attached_deposit())
-            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(3))
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(2))
             .with_unused_gas_weight(0)
             .mint(token_owner.clone(), amount)
             .then(

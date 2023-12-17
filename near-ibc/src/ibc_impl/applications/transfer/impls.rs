@@ -40,7 +40,7 @@ impl TokenTransferExecutionContext for TransferModule {
         } else if sender_id.ends_with(prefixed_ef.as_str()) {
             ext_channel_escrow::ext(from.0.clone())
                 .with_attached_deposit(NearToken::from_yoctonear(1))
-                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(5))
+                .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(6))
                 .with_unused_gas_weight(0)
                 .do_transfer(
                     trace_path,
