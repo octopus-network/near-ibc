@@ -2,17 +2,17 @@ use crate::{prelude::*, StorageKey};
 use core::fmt::Debug;
 use ibc::{
     core::{
-        ics04_channel::{
+        channel::types::{
             acknowledgement::Acknowledgement,
             channel::{Counterparty, Order},
             error::{ChannelError, PacketError},
             packet::Packet,
             Version,
         },
-        ics24_host::identifier::{ChannelId, ConnectionId, PortId},
-        router::{Module, ModuleExtras},
+        host::types::identifiers::{ChannelId, ConnectionId, PortId},
+        router::{module::Module, types::module::ModuleExtras},
     },
-    Signer,
+    primitives::Signer,
 };
 use near_sdk::{
     borsh::{BorshDeserialize, BorshSerialize},

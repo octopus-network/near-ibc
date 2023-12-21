@@ -1,6 +1,5 @@
 use crate::{types::ProcessingResult, *};
-use ibc::core::ics24_host::path::{ClientConsensusStatePath, ClientStatePath};
-use near_sdk::near_bindgen;
+use ibc::core::host::types::path::{ClientConsensusStatePath, ClientStatePath};
 
 ///
 fn assert_testnet() {
@@ -22,18 +21,19 @@ pub trait TestnetFunctions {
     ///
     fn clear_channels(&mut self) -> ProcessingResult;
     ///
+    fn clear_consensus_state_by(
+        &mut self,
+        client_id: ClientId,
+        height: Option<Height>,
+    ) -> ProcessingResult;
+    ///
     fn remove_client(&mut self, client_id: ClientId);
     ///
     fn remove_raw_client(&mut self, client_id: ClientId);
     ///
-    fn cancel_transfer_request_in_channel_escrow(
-        &mut self,
-        channel_id: String,
-        trace_path: String,
-        base_denom: String,
-        sender_id: AccountId,
-        amount: U128,
-    );
+    fn remove_connection(&mut self, connection_id: ConnectionId);
+    ///
+    fn remove_channel(&mut self, port_id: PortId, channel_id: ChannelId);
 }
 
 #[near_bindgen]
@@ -69,7 +69,6 @@ impl TestnetFunctions for NearIbcContract {
         let mut count = 0;
         for client_id in client_ids {
             near_ibc_store.remove_client(&client_id);
-            near_ibc_store.client_id_set.remove(&client_id);
             count += 1;
             if env::used_gas() >= max_gas || count >= 100 {
                 self.near_ibc_store.set(&near_ibc_store);
@@ -93,7 +92,6 @@ impl TestnetFunctions for NearIbcContract {
         let mut count = 0;
         for connection_id in connection_ids {
             near_ibc_store.remove_connection(&connection_id);
-            near_ibc_store.connection_id_set.remove(&connection_id);
             count += 1;
             if env::used_gas() >= max_gas || count >= 100 {
                 self.near_ibc_store.set(&near_ibc_store);
@@ -117,7 +115,6 @@ impl TestnetFunctions for NearIbcContract {
         let mut count = 0;
         for port_channel_id in port_channel_ids {
             near_ibc_store.remove_channel(&port_channel_id);
-            near_ibc_store.port_channel_id_set.remove(&port_channel_id);
             count += 1;
             if env::used_gas() >= max_gas || count >= 100 {
                 self.near_ibc_store.set(&near_ibc_store);
@@ -126,6 +123,20 @@ impl TestnetFunctions for NearIbcContract {
         }
         self.near_ibc_store.set(&near_ibc_store);
         ProcessingResult::Ok
+    }
+    ///
+    fn clear_consensus_state_by(
+        &mut self,
+        client_id: ClientId,
+        lt_height: Option<Height>,
+    ) -> ProcessingResult {
+        assert_testnet();
+        self.assert_governance();
+        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
+        let result = near_ibc_store.clear_consensus_state_by(&client_id, lt_height.as_ref());
+        near_ibc_store.flush();
+        self.near_ibc_store.set(&near_ibc_store);
+        result
     }
     ///
     fn remove_client(&mut self, client_id: ClientId) {
@@ -143,7 +154,7 @@ impl TestnetFunctions for NearIbcContract {
         near_ibc_store.client_processed_heights.remove(&client_id);
         near_ibc_store.client_processed_times.remove(&client_id);
         env::storage_remove(
-            &ClientConsensusStatePath::new(&client_id, &Height::new(0, 1).unwrap())
+            &ClientConsensusStatePath::new(client_id.clone(), 0, 1)
                 .to_string()
                 .into_bytes(),
         );
@@ -154,24 +165,106 @@ impl TestnetFunctions for NearIbcContract {
         self.near_ibc_store.set(&near_ibc_store);
         env::storage_remove(&ClientStatePath::new(&client_id).to_string().into_bytes());
     }
-    //
-    fn cancel_transfer_request_in_channel_escrow(
-        &mut self,
-        channel_id: String,
-        trace_path: String,
-        base_denom: String,
-        sender_id: AccountId,
-        amount: U128,
-    ) {
+    ///
+    fn remove_connection(&mut self, connection_id: ConnectionId) {
+        assert_testnet();
         self.assert_governance();
-        let channel_escrow_id =
-            format!("{}.{}", channel_id, utils::get_escrow_factory_contract_id());
-        ext_process_transfer_request_callback::ext(
-            AccountId::from_str(channel_escrow_id.as_str()).unwrap(),
-        )
-        .with_attached_deposit(0)
-        .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(4))
-        .with_unused_gas_weight(0)
-        .cancel_transfer_request(trace_path, base_denom, sender_id, amount);
+        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store.remove_connection(&connection_id);
+        self.near_ibc_store.set(&near_ibc_store);
+    }
+    ///
+    fn remove_channel(&mut self, port_id: PortId, channel_id: ChannelId) {
+        assert_testnet();
+        self.assert_governance();
+        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
+        near_ibc_store.remove_channel(&(port_id, channel_id));
+        self.near_ibc_store.set(&near_ibc_store);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ibc::core::host::types::identifiers::ClientType;
+    use itertools::Itertools;
+    use near_sdk::store::UnorderedSet;
+    use near_sdk::test_utils::VMContextBuilder;
+    use near_sdk::testing_env;
+
+    fn test_client_id() -> ClientId {
+        ClientId::new(ClientType::from_str("07-tendermint").unwrap(), 0).unwrap()
+    }
+
+    fn write_height(near_ibc_contract: &mut NearIbcContract, heights: &Vec<Height>) {
+        let mut near_ibc_store = near_ibc_contract.near_ibc_store.get().unwrap();
+
+        let client_id = test_client_id();
+        near_ibc_store.client_consensus_state_height_sets.insert(
+            client_id.clone(),
+            UnorderedSet::new(StorageKey::ClientConsensusStateHeightSet {
+                client_id: client_id.clone(),
+            }),
+        );
+
+        let height_set = near_ibc_store
+            .client_consensus_state_height_sets
+            .get_mut(&client_id)
+            .unwrap();
+
+        for h in heights {
+            height_set.insert(h.clone());
+        }
+
+        height_set.flush();
+        near_ibc_store.flush();
+        near_ibc_contract.near_ibc_store.set(&near_ibc_store);
+    }
+
+    fn assert_consensus_state_heights(
+        near_ibc_contract: &mut NearIbcContract,
+        aim_sorted_heights: &Vec<Height>,
+    ) {
+        let near_ibc_store = near_ibc_contract.near_ibc_store.get().unwrap();
+
+        let client_id = test_client_id();
+        let height_set = near_ibc_store
+            .client_consensus_state_height_sets
+            .get(&client_id)
+            .unwrap();
+        let sorted_heights = height_set.iter().sorted().collect_vec();
+        dbg!(&sorted_heights, &aim_sorted_heights);
+
+        for i in 0..aim_sorted_heights.len() {
+            assert!(sorted_heights
+                .get(i)
+                .unwrap()
+                .eq(&aim_sorted_heights.get(i).unwrap()));
+        }
+    }
+
+    #[test]
+    fn test_clear_consensus_state_clear_by() {
+        let test_account: AccountId = "account.testnet".parse().unwrap();
+        let mut context: VMContextBuilder = VMContextBuilder::new();
+        testing_env!(context.predecessor_account_id(test_account.clone()).build());
+        testing_env!(context.current_account_id(test_account.clone()).build());
+
+        let mut near_ibc_contract = NearIbcContract::init(test_account);
+        let height = vec![
+            Height::new(0, 1).unwrap(),
+            Height::new(0, 2).unwrap(),
+            Height::new(0, 3).unwrap(),
+            Height::new(0, 4).unwrap(),
+        ];
+        write_height(&mut near_ibc_contract, &height);
+        assert_consensus_state_heights(&mut near_ibc_contract, &height);
+
+        let lt_height = Height::new(0, 3).unwrap();
+        near_ibc_contract.clear_consensus_state_by(test_client_id(), Some(lt_height));
+        let after_clear_height = vec![Height::new(0, 3).unwrap(), Height::new(0, 4).unwrap()];
+        assert_consensus_state_heights(&mut near_ibc_contract, &after_clear_height);
+        near_ibc_contract.clear_consensus_state_by(test_client_id(), None);
+        assert_consensus_state_heights(&mut near_ibc_contract, &vec![]);
     }
 }

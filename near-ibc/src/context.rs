@@ -1,30 +1,23 @@
 use crate::{
-    collections::{
-        IndexedAscendingLookupQueue, IndexedAscendingQueueViewer, IndexedAscendingSimpleQueue,
-    },
-    prelude::*,
-    types::ProcessingResult,
-    StorageKey,
+    collections::IndexedAscendingLookupQueue, prelude::*, types::ProcessingResult, StorageKey,
 };
 use core::fmt::{Debug, Formatter};
-use ibc::{
-    core::{
-        events::IbcEvent,
-        ics04_channel::packet::Sequence,
-        ics24_host::{
-            identifier::{ChannelId, ClientId, ConnectionId, PortId},
-            path::{
-                AckPath, ClientConnectionPath, ClientConsensusStatePath, ClientStatePath,
-                CommitmentPath, ConnectionPath, ReceiptPath, SeqAckPath, SeqRecvPath, SeqSendPath,
-            },
+use ibc::core::{
+    client::types::Height,
+    handler::types::events::IbcEvent,
+    host::types::{
+        identifiers::{ChannelId, ClientId, ConnectionId, PortId, Sequence},
+        path::{
+            AckPath, ClientConnectionPath, ClientConsensusStatePath, ClientStatePath,
+            CommitmentPath, ConnectionPath, ReceiptPath, SeqAckPath, SeqRecvPath, SeqSendPath,
         },
     },
-    Height,
 };
+use itertools::Itertools;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env, log,
-    store::{LookupMap, UnorderedSet},
+    store::{LookupMap, UnorderedMap, UnorderedSet},
 };
 use serde::{Deserialize, Serialize};
 
@@ -37,14 +30,11 @@ pub struct NearIbcStore {
     /// The client ids of the clients.
     pub client_id_set: UnorderedSet<ClientId>,
     pub client_counter: u64,
-    pub client_processed_times:
-        LookupMap<ClientId, IndexedAscendingLookupQueue<Height, NearTimeStamp>>,
-    pub client_processed_heights:
-        LookupMap<ClientId, IndexedAscendingLookupQueue<Height, HostHeight>>,
+    pub client_processed_times: LookupMap<ClientId, UnorderedMap<Height, NearTimeStamp>>,
+    pub client_processed_heights: LookupMap<ClientId, UnorderedMap<Height, HostHeight>>,
     /// This collection contains the heights corresponding to all consensus states of
     /// all clients stored in the contract.
-    pub client_consensus_state_height_sets:
-        LookupMap<ClientId, IndexedAscendingSimpleQueue<Height>>,
+    pub client_consensus_state_height_sets: LookupMap<ClientId, UnorderedSet<Height>>,
     /// The connection ids of the connections.
     pub connection_id_set: UnorderedSet<ConnectionId>,
     pub connection_counter: u64,
@@ -115,13 +105,13 @@ impl NearIbcStore {
     ///
     pub fn remove_client(&mut self, client_id: &ClientId) {
         if let Some(queue) = self.client_processed_heights.get_mut(client_id) {
-            queue.clear(None);
+            queue.clear();
             queue.flush();
         }
         self.client_processed_heights.remove(client_id);
         self.client_processed_heights.flush();
         if let Some(queue) = self.client_processed_times.get_mut(client_id) {
-            queue.clear(None);
+            queue.clear();
             queue.flush();
         }
         self.client_processed_times.remove(client_id);
@@ -134,15 +124,17 @@ impl NearIbcStore {
         self.client_consensus_state_height_sets
             .get(client_id)
             .map(|heights| {
-                heights.keys().iter().for_each(|height| {
-                    height.map(|height| {
-                        env::storage_remove(
-                            &ClientConsensusStatePath::new(client_id, height)
-                                .to_string()
-                                .into_bytes(),
+                heights.iter().for_each(|height| {
+                    env::storage_remove(
+                        &ClientConsensusStatePath::new(
+                            client_id.clone(),
+                            height.revision_number(),
+                            height.revision_height(),
                         )
-                    });
-                })
+                        .to_string()
+                        .into_bytes(),
+                    );
+                });
             });
         self.client_consensus_state_height_sets.remove(client_id);
         self.client_consensus_state_height_sets.flush();
@@ -215,6 +207,53 @@ impl NearIbcStore {
             port_channel_id.0,
             port_channel_id.1
         );
+    }
+    ///
+    pub fn clear_consensus_state_by(
+        &mut self,
+        client_id: &ClientId,
+        lt_height: Option<&Height>,
+    ) -> ProcessingResult {
+        let max_gas = env::prepaid_gas().saturating_mul(2).saturating_div(5);
+        let height_set = self
+            .client_consensus_state_height_sets
+            .get_mut(client_id)
+            .unwrap();
+        let height_iter: Box<dyn Iterator<Item = &Height>> = if lt_height.is_some() {
+            Box::new(height_set.iter().sorted())
+        } else {
+            Box::new(height_set.iter())
+        };
+
+        let mut result = ProcessingResult::Ok;
+        let mut need_remove_heights = vec![];
+        for height in height_iter {
+            if lt_height.is_some() && height.ge(lt_height.unwrap()) {
+                break;
+            }
+            env::storage_remove(
+                &ClientConsensusStatePath::new(
+                    client_id.clone(),
+                    height.revision_number(),
+                    height.revision_height(),
+                )
+                .to_string()
+                .into_bytes(),
+            );
+            need_remove_heights.push(height.clone());
+
+            if env::used_gas() >= max_gas {
+                result = ProcessingResult::NeedMoreGas;
+                break;
+            }
+        }
+
+        // It is why max_gas is 2/5 prepaid_gas
+        for height in need_remove_heights {
+            height_set.remove(&height);
+        }
+        self.client_consensus_state_height_sets.flush();
+        result
     }
     ///
     pub fn clear_counters(&mut self) {

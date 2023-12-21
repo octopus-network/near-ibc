@@ -9,7 +9,7 @@ impl TransferRequestHandler for NearIbcContract {
         let timeout_seconds = transfer_request
             .timeout_seconds
             .map_or_else(|| DEFAULT_TIMEOUT_SECONDS, |value| value.0);
-        if let Err(e) = ibc::applications::transfer::send_transfer(
+        if let Err(e) = ibc::apps::transfer::handler::send_transfer(
             &mut near_ibc_store,
             &mut TransferModule(),
             MsgTransfer {
@@ -48,7 +48,7 @@ impl TransferRequestHandler for NearIbcContract {
                 transfer_request.amount.0
             );
             ext_process_transfer_request_callback::ext(env::predecessor_account_id())
-                .with_attached_deposit(0)
+                .with_attached_deposit(NearToken::from_yoctonear(0))
                 .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(4))
                 .with_unused_gas_weight(0)
                 .cancel_transfer_request(

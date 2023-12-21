@@ -10,10 +10,11 @@
 extern crate alloc;
 
 use core::str::FromStr;
-use ibc::applications::transfer::PORT_ID_STR;
+use ibc::apps::transfer::types::PORT_ID_STR;
+use near_contract_standards::fungible_token::Balance;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    env, AccountId, Balance, Gas, Promise,
+    env, AccountId, Gas, NearToken, Promise,
 };
 use prelude::*;
 
@@ -76,7 +77,7 @@ impl ExtraDepositCost {
 /// Better to call this function at the end of a `payable` function
 /// by recording the `previously_used_bytes` at the start of the `payable` function.
 pub fn refund_deposit(previously_used_bytes: u64) {
-    let mut refund_amount = env::attached_deposit();
+    let mut refund_amount = env::attached_deposit().as_yoctonear();
     let extra_deposit_cost = ExtraDepositCost::get().0;
     if env::storage_usage() > previously_used_bytes || extra_deposit_cost > 0 {
         let storage_increment = match env::storage_usage() > previously_used_bytes {
@@ -88,14 +89,15 @@ pub fn refund_deposit(previously_used_bytes: u64) {
             storage_increment,
             extra_deposit_cost
         );
-        let cost = env::storage_byte_cost() * storage_increment as u128 + extra_deposit_cost;
+        let cost = env::storage_byte_cost().as_yoctonear() * storage_increment as u128
+            + extra_deposit_cost;
         if cost >= refund_amount {
             return;
         } else {
             refund_amount -= cost;
         }
     }
-    Promise::new(env::predecessor_account_id()).transfer(refund_amount);
+    Promise::new(env::predecessor_account_id()).transfer(NearToken::from_yoctonear(refund_amount));
 }
 
 /// Asserts that the predecessor account is the root account.

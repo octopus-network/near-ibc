@@ -2,13 +2,16 @@ use super::OctopusLposModule;
 use crate::{context::NearIbcStoreHost, ibc_impl::core::client_state::AnyClientState, prelude::*};
 use core::str::FromStr;
 use ibc::core::{
-    ics04_channel::channel::ChannelEnd,
-    ics24_host::{
-        identifier::{ChannelId, ConnectionId, PortId},
-        path::ChannelEndPath,
+    channel::types::channel::ChannelEnd,
+    host::{
+        types::{
+            identifiers::{ChannelId, ConnectionId, PortId},
+            path::ChannelEndPath,
+        },
+        ValidationContext,
     },
 };
-use near_sdk::{ext_contract, json_types::U64, AccountId};
+use near_sdk::{ext_contract, json_types::U64, AccountId, NearToken};
 use octopus_lpos::{
     context::{OctopusLposExecutionContext, OctopusLposValidationContext},
     error::OctopusLposError,
@@ -47,7 +50,7 @@ impl OctopusLposValidationContext for OctopusLposModule {
             .ok_or_else(|| OctopusLposError::InvalidConsumerChainId {
                 chain_id: consumer_chain_id.clone(),
             })?;
-        let channel_end = ibc::core::ValidationContext::channel_end(
+        let channel_end = ValidationContext::channel_end(
             &near_ibc_store,
             &ChannelEndPath::new(&port_id, channel_id),
         )?;
@@ -58,14 +61,13 @@ impl OctopusLposValidationContext for OctopusLposModule {
         connection_id: &ConnectionId,
     ) -> Result<ConsumerChainId, OctopusLposError> {
         let near_ibc_store = OctopusLposModule::get_near_ibc_store();
-        let connection_end =
-            ibc::core::ValidationContext::connection_end(&near_ibc_store, connection_id)?;
-        let client_state = ibc::core::ValidationContext::client_state(
-            &near_ibc_store,
-            &connection_end.client_id(),
-        )?;
+        let connection_end = ValidationContext::connection_end(&near_ibc_store, connection_id)?;
+        let client_state =
+            ValidationContext::client_state(&near_ibc_store, &connection_end.client_id())?;
         match client_state {
-            AnyClientState::Tendermint(client_state) => Ok(client_state.chain_id.to_string()),
+            AnyClientState::Tendermint(client_state) => {
+                Ok(client_state.inner().chain_id.to_string())
+            }
         }
     }
     //
@@ -74,7 +76,7 @@ impl OctopusLposValidationContext for OctopusLposModule {
         channel_id: &ChannelId,
     ) -> Result<ConsumerChainId, OctopusLposError> {
         let near_ibc_store = OctopusLposModule::get_near_ibc_store();
-        let channel_end = ibc::core::ValidationContext::channel_end(
+        let channel_end = ValidationContext::channel_end(
             &near_ibc_store,
             &ChannelEndPath(self.get_port()?, channel_id.clone()),
         )?;
@@ -111,7 +113,7 @@ impl OctopusLposExecutionContext for OctopusLposModule {
                 }
             })?,
         )
-        .with_attached_deposit(0)
+        .with_attached_deposit(NearToken::from_yoctonear(0))
         .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(10))
         .with_unused_gas_weight(0)
         .slash_validator(slach_packet_data);
@@ -135,7 +137,7 @@ impl OctopusLposExecutionContext for OctopusLposModule {
                 }
             })?,
         )
-        .with_attached_deposit(0)
+        .with_attached_deposit(NearToken::from_yoctonear(0))
         .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
         .with_unused_gas_weight(0)
         .on_vsc_matured(U64::from(validator_set_id));
@@ -159,7 +161,7 @@ impl OctopusLposExecutionContext for OctopusLposModule {
                 }
             })?,
         )
-        .with_attached_deposit(0)
+        .with_attached_deposit(NearToken::from_yoctonear(0))
         .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
         .distribute_reward(U64::from(validator_set_id));
         Ok(())

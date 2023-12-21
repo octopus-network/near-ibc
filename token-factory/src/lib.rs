@@ -1,12 +1,12 @@
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    env,
+    env, ext_contract,
     json_types::{Base58CryptoHash, U128},
-    near_bindgen,
+    log, near_bindgen,
     serde::{Deserialize, Serialize},
-    store::UnorderedMap,
-    AccountId, BorshStorageKey, PanicOnDefault, Promise,
+    store::{LookupMap, UnorderedMap},
+    AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise, PromiseResult,
 };
 use utils::{
     interfaces::{ext_wrapped_token, TokenFactory},
@@ -14,18 +14,24 @@ use utils::{
     ExtraDepositCost,
 };
 
+mod migration;
+
 #[derive(BorshSerialize, BorshStorageKey)]
 #[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
     TokenContractWasm,
     AssetIdMappings,
+    DenomToAssetIdMap,
 }
 
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
 #[borsh(crate = "near_sdk::borsh")]
 pub struct Contract {
+    /// Maps asset id to cross chain asset.
     asset_id_mappings: UnorderedMap<String, CrossChainAsset>,
+    /// Maps asset denom to asset id.
+    denom_to_asset_id_map: LookupMap<AssetDenom, String>,
 }
 
 #[near_bindgen]
@@ -40,6 +46,7 @@ impl Contract {
         );
         Self {
             asset_id_mappings: UnorderedMap::new(StorageKey::AssetIdMappings),
+            denom_to_asset_id_map: LookupMap::new(StorageKey::DenomToAssetIdMap),
         }
     }
     ///
@@ -74,10 +81,10 @@ impl TokenFactory for Contract {
         };
         self.assert_asset_not_registered(&cross_chain_asset);
         let minimum_deposit = utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT
-            + env::storage_byte_cost()
+            + env::storage_byte_cost().as_yoctonear()
                 * (32 + borsh::to_vec(&cross_chain_asset).unwrap().len()) as u128;
         assert!(
-            env::attached_deposit() >= minimum_deposit,
+            env::attached_deposit().as_yoctonear() >= minimum_deposit,
             "ERR_NOT_ENOUGH_DEPOSIT, must not less than {} yocto",
             minimum_deposit
         );
@@ -123,14 +130,16 @@ impl TokenFactory for Contract {
             near_sdk::serde_json::to_vec(&args).expect("ERR_SERIALIZE_ARGS_FOR_MINT_FUNCTION");
         Promise::new(token_contract_id)
             .create_account()
-            .transfer(utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT)
+            .transfer(NearToken::from_yoctonear(
+                utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT,
+            ))
             .deploy_contract(
                 env::storage_read(&borsh::to_vec(&StorageKey::TokenContractWasm).unwrap()).unwrap(),
             )
             .function_call(
                 "new".to_string(),
                 args,
-                0,
+                NearToken::from_yoctonear(0),
                 utils::GAS_FOR_SIMPLE_FUNCTION_CALL,
             );
         ExtraDepositCost::add(utils::INIT_BALANCE_FOR_WRAPPED_TOKEN_CONTRACT);
@@ -154,21 +163,76 @@ impl TokenFactory for Contract {
             trace_path,
             base_denom,
         };
-        let maybe_asset = self
-            .asset_id_mappings
-            .iter()
-            .find(|asset| asset.1.asset_denom == asset_denom);
-        assert!(maybe_asset.is_some(), "ERR_ASSET_NEEDS_TO_BE_SETUP");
+        let maybe_asset_id = self
+            .denom_to_asset_id_map
+            .get(&asset_denom)
+            .map(|v| v.clone());
+        assert!(maybe_asset_id.is_some(), "ERR_ASSET_NEEDS_TO_BE_SETUP");
         // Mint tokens.
         let token_contract_id: AccountId =
-            format!("{}.{}", maybe_asset.unwrap().0, env::current_account_id())
+            format!("{}.{}", maybe_asset_id.unwrap(), env::current_account_id())
                 .parse()
                 .unwrap();
-        ext_wrapped_token::ext(token_contract_id)
+        ext_wrapped_token::ext(token_contract_id.clone())
             .with_attached_deposit(env::attached_deposit())
-            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(3))
+            .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(2))
             .with_unused_gas_weight(0)
-            .mint(token_owner, amount);
+            .mint(token_owner.clone(), amount)
+            .then(
+                ext_mint_callback::ext(env::current_account_id())
+                    .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                    .with_unused_gas_weight(0)
+                    .mint_callback(
+                        asset_denom.to_string(),
+                        token_contract_id,
+                        token_owner,
+                        amount,
+                    ),
+            );
+    }
+}
+
+#[ext_contract(ext_mint_callback)]
+pub trait MintCallback {
+    fn mint_callback(
+        &mut self,
+        denom: String,
+        token_contract: AccountId,
+        token_owner: AccountId,
+        amount: U128,
+    );
+}
+
+#[near_bindgen]
+impl MintCallback for Contract {
+    #[private]
+    fn mint_callback(
+        &mut self,
+        denom: String,
+        token_contract: AccountId,
+        token_owner: AccountId,
+        amount: U128,
+    ) {
+        match env::promise_result(0) {
+            PromiseResult::Successful(_bytes) => {
+                log!(
+                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0","event":"MINT_SUCCEEDED","denom":"{}","token_contract":"{}","token_owner":"{}","amount":"{}"}}"#,
+                    denom,
+                    token_contract,
+                    token_owner,
+                    amount.0,
+                );
+            }
+            PromiseResult::Failed => {
+                log!(
+                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0","event":"ERR_MINT","denom":"{}","token_contract":"{}","receiver_id":"{}","amount":"{}"}}"#,
+                    denom,
+                    token_contract,
+                    token_owner,
+                    amount.0,
+                );
+            }
+        }
     }
 }
 
@@ -208,11 +272,11 @@ pub extern "C" fn store_wasm_of_token_contract() {
     let blob_len = input.len();
     if blob_len > current_len {
         let storage_cost = (env::storage_usage() + blob_len as u64 - current_len as u64) as u128
-            * env::storage_byte_cost();
+            * env::storage_byte_cost().as_yoctonear();
         assert!(
-            env::account_balance() >= storage_cost,
+            env::account_balance().as_yoctonear() >= storage_cost,
             "ERR_NOT_ENOUGH_ACCOUNT_BALANCE, needs {} more.",
-            storage_cost - env::account_balance()
+            storage_cost - env::account_balance().as_yoctonear()
         );
     }
 

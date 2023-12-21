@@ -13,17 +13,17 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use ibc::applications::transfer::PORT_ID_STR;
+use ibc::apps::transfer::types::PORT_ID_STR;
 use near_contract_standards::fungible_token::core::ext_ft_core;
 use near_sdk::{
     borsh::{BorshDeserialize, BorshSerialize},
-    env,
+    env, ext_contract,
     json_types::{U128, U64},
-    near_bindgen,
+    log, near_bindgen,
     serde::{Deserialize, Serialize},
     serde_json,
-    store::UnorderedMap,
-    AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseOrValue,
+    store::{LookupMap, UnorderedMap},
+    AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise, PromiseOrValue, PromiseResult,
 };
 use utils::{
     interfaces::{
@@ -33,11 +33,14 @@ use utils::{
     types::{AssetDenom, Ics20TransferRequest},
 };
 
+mod migration;
+
 #[derive(BorshSerialize, BorshStorageKey)]
 #[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
     TokenContracts,
     PendingTransferRequests,
+    DenomToTokenContractMap,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -65,6 +68,8 @@ pub struct Contract {
     token_contracts: UnorderedMap<AccountId, AssetDenom>,
     /// Accounting for the pending transfer requests.
     pending_transfer_requests: UnorderedMap<AccountId, Ics20TransferRequest>,
+    /// The mapping from the asset denom to the token contract account id.
+    denom_to_token_contract_map: LookupMap<AssetDenom, AccountId>,
 }
 
 #[near_bindgen]
@@ -81,6 +86,7 @@ impl Contract {
             near_ibc_account,
             token_contracts: UnorderedMap::new(StorageKey::TokenContracts),
             pending_transfer_requests: UnorderedMap::new(StorageKey::PendingTransferRequests),
+            denom_to_token_contract_map: LookupMap::new(StorageKey::DenomToTokenContractMap),
         }
     }
     /// Callback function for `ft_transfer_call` of NEP-141 compatible contracts
@@ -117,7 +123,7 @@ impl Contract {
             timeout_seconds: msg.timeout_seconds,
         };
         ext_transfer_request_handler::ext(self.near_ibc_account())
-            .with_attached_deposit(0)
+            .with_attached_deposit(NearToken::from_yoctonear(0))
             .with_static_gas(utils::GAS_FOR_COMPLEX_FUNCTION_CALL)
             .with_unused_gas_weight(0)
             .process_transfer_request(transfer_request.clone());
@@ -135,24 +141,57 @@ impl Contract {
         amount: U128,
     ) {
         assert!(
-            self.pending_transfer_requests.contains_key(&account_id),
+            self.pending_transfer_requests.contains_key(account_id),
             "ERR_NO_PENDING_TRANSFER_REQUEST"
         );
-        let req = self.pending_transfer_requests.get(&account_id).unwrap();
+        let req = self.pending_transfer_requests.get(account_id).unwrap();
         assert!(
             req.amount == amount
                 && req.token_denom.eq(base_denom)
                 && req.token_trace_path.eq(trace_path),
             "ERR_PENDING_TRANSFER_REQUEST_NOT_MATCHED"
         );
-        self.pending_transfer_requests.remove(&account_id);
+        self.pending_transfer_requests.remove(account_id);
     }
-    // Get token contract account id corresponding to the asset denom.
-    fn get_token_contract_by_asset_denom(&self, asset_denom: &AssetDenom) -> Option<AccountId> {
-        self.token_contracts
-            .iter()
-            .find(|(_, value)| *value == asset_denom)
-            .map(|(id, _)| id.clone())
+}
+
+#[ext_contract(ext_ft_transfer_callback)]
+pub trait FtTransferCallback {
+    fn ft_transfer_callback(
+        &mut self,
+        token_contract: AccountId,
+        receiver_id: AccountId,
+        amount: U128,
+    );
+}
+
+#[near_bindgen]
+impl FtTransferCallback for Contract {
+    #[private]
+    fn ft_transfer_callback(
+        &mut self,
+        token_contract: AccountId,
+        receiver_id: AccountId,
+        amount: U128,
+    ) {
+        match env::promise_result(0) {
+            PromiseResult::Successful(_bytes) => {
+                log!(
+                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0","event":"FT_TRANSFER_SUCCEEDED","token_contract":"{}","receiver_id":"{}","amount":"{}"}}"#,
+                    token_contract,
+                    receiver_id,
+                    amount.0,
+                );
+            }
+            PromiseResult::Failed => {
+                log!(
+                    r#"EVENT_JSON:{{"standard":"nep297","version":"1.0.0","event":"ERR_FT_TRANSFER","token_contract":"{}","receiver_id":"{}","amount":"{}"}}"#,
+                    token_contract,
+                    receiver_id,
+                    amount.0,
+                );
+            }
+        }
     }
 }
 
@@ -165,12 +204,15 @@ impl ChannelEscrow for Contract {
             trace_path: String::new(),
             base_denom,
         };
-        let maybe_existed_token_contract = self.get_token_contract_by_asset_denom(&asset_denom);
+        let maybe_existed_token_contract = self.denom_to_token_contract_map.get(&asset_denom);
         assert!(
             maybe_existed_token_contract.is_none(),
             "ERR_TOKEN_CONTRACT_ALREADY_REGISTERED"
         );
-        self.token_contracts.insert(token_contract, asset_denom);
+        self.token_contracts
+            .insert(token_contract.clone(), asset_denom.clone());
+        self.denom_to_token_contract_map
+            .insert(asset_denom, token_contract);
     }
 
     #[payable]
@@ -186,7 +228,7 @@ impl ChannelEscrow for Contract {
             trace_path,
             base_denom,
         };
-        let maybe_existed_token_contract = self.get_token_contract_by_asset_denom(&asset_denom);
+        let maybe_existed_token_contract = self.denom_to_token_contract_map.get(&asset_denom);
         assert!(
             maybe_existed_token_contract.is_some(),
             "ERR_INVALID_TOKEN_DENOM"
@@ -194,10 +236,16 @@ impl ChannelEscrow for Contract {
         near_sdk::assert_one_yocto();
         let token_contract = maybe_existed_token_contract.unwrap();
         ext_ft_core::ext(token_contract.clone())
-            .with_attached_deposit(1)
+            .with_attached_deposit(NearToken::from_yoctonear(1))
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(2))
             .with_unused_gas_weight(0)
-            .ft_transfer(receiver_id, amount.into(), None);
+            .ft_transfer(receiver_id.clone(), amount, None)
+            .then(
+                ext_ft_transfer_callback::ext(env::current_account_id())
+                    .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL)
+                    .with_unused_gas_weight(0)
+                    .ft_transfer_callback(token_contract.clone(), receiver_id, amount),
+            );
     }
 }
 
@@ -215,7 +263,10 @@ impl ProcessTransferRequestCallback for Contract {
             trace_path,
             base_denom,
         };
-        let maybe_existed_token_contract = self.get_token_contract_by_asset_denom(&asset_denom);
+        let maybe_existed_token_contract = self
+            .denom_to_token_contract_map
+            .get(&asset_denom)
+            .map(|v| v.clone());
         assert!(
             maybe_existed_token_contract.is_some(),
             "ERR_INVALID_TOKEN_DENOM"
@@ -240,7 +291,10 @@ impl ProcessTransferRequestCallback for Contract {
             trace_path,
             base_denom,
         };
-        let maybe_existed_token_contract = self.get_token_contract_by_asset_denom(&asset_denom);
+        let maybe_existed_token_contract = self
+            .denom_to_token_contract_map
+            .get(&asset_denom)
+            .map(|v| v.clone());
         assert!(
             maybe_existed_token_contract.is_some(),
             "ERR_INVALID_TOKEN_DENOM"
@@ -253,7 +307,7 @@ impl ProcessTransferRequestCallback for Contract {
         );
         let token_contract = maybe_existed_token_contract.unwrap();
         ext_ft_core::ext(token_contract.clone())
-            .with_attached_deposit(1)
+            .with_attached_deposit(NearToken::from_yoctonear(1))
             .with_static_gas(utils::GAS_FOR_SIMPLE_FUNCTION_CALL.saturating_mul(2))
             .with_unused_gas_weight(0)
             .ft_transfer(sender_id, amount.into(), None);
