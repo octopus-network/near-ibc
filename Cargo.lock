@@ -472,7 +472,7 @@ checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 
 [[package]]
 name = "channel-escrow"
-version = "0.1.0"
+version = "1.0.1"
 dependencies = [
  "hex",
  "ibc",
@@ -859,7 +859,7 @@ dependencies = [
 
 [[package]]
 name = "escrow-factory"
-version = "0.1.0"
+version = "1.0.1"
 dependencies = [
  "hex",
  "ibc",
@@ -1930,7 +1930,7 @@ dependencies = [
 
 [[package]]
 name = "near-ibc"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "getrandom 0.2.11",
  "hex",
@@ -3279,7 +3279,7 @@ dependencies = [
 
 [[package]]
 name = "token-factory"
-version = "0.1.0"
+version = "1.0.1"
 dependencies = [
  "hex",
  "near-contract-standards",
@@ -3626,7 +3626,7 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "utils"
-version = "0.1.0"
+version = "1.0.1"
 dependencies = [
  "ibc",
  "near-contract-standards",
@@ -3918,7 +3918,7 @@ dependencies = [
 
 [[package]]
 name = "wrapped-token"
-version = "0.1.0"
+version = "1.0.1"
 dependencies = [
  "ibc",
  "near-contract-standards",

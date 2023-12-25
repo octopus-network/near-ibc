@@ -43,6 +43,8 @@ pub trait EscrowFactory {
 pub trait ChannelEscrow {
     /// Register a token contract which is allowed to send tokens to this contract.
     fn register_asset(&mut self, base_denom: String, token_contract: AccountId);
+    /// Unregister an asset which has already been registered.
+    fn unregister_asset(&mut self, base_denom: String);
     /// Send a certain amount of tokens to a certain account.
     fn do_transfer(
         &mut self,

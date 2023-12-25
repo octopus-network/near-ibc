@@ -40,6 +40,8 @@ use utils::{
     types::Ics20TransferRequest,
 };
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(BorshSerialize, BorshStorageKey)]
 #[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
@@ -112,6 +114,10 @@ impl Contract {
         this.token
             .internal_register_account(&env::current_account_id());
         this
+    }
+    ///
+    pub fn version(&self) -> String {
+        VERSION.to_string()
     }
     /// Request a transfer by burning a certain amount of tokens,
     /// for sending them to another chain.

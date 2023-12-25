@@ -35,6 +35,8 @@ use utils::{
 
 mod migration;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(BorshSerialize, BorshStorageKey)]
 #[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
@@ -88,6 +90,10 @@ impl Contract {
             pending_transfer_requests: UnorderedMap::new(StorageKey::PendingTransferRequests),
             denom_to_token_contract_map: LookupMap::new(StorageKey::DenomToTokenContractMap),
         }
+    }
+    ///
+    pub fn version(&self) -> String {
+        VERSION.to_string()
     }
     /// Callback function for `ft_transfer_call` of NEP-141 compatible contracts
     pub fn ft_on_transfer(
@@ -197,6 +203,7 @@ impl FtTransferCallback for Contract {
 
 #[near_bindgen]
 impl ChannelEscrow for Contract {
+    //
     #[payable]
     fn register_asset(&mut self, base_denom: String, token_contract: AccountId) {
         self.assert_near_ibc_account();
@@ -214,7 +221,23 @@ impl ChannelEscrow for Contract {
         self.denom_to_token_contract_map
             .insert(asset_denom, token_contract);
     }
-
+    //
+    fn unregister_asset(&mut self, base_denom: String) {
+        self.assert_near_ibc_account();
+        let asset_denom = AssetDenom {
+            trace_path: String::new(),
+            base_denom,
+        };
+        let maybe_existed_token_contract = self.denom_to_token_contract_map.get(&asset_denom);
+        assert!(
+            maybe_existed_token_contract.is_some(),
+            "ERR_INVALID_TOKEN_DENOM"
+        );
+        let token_contract = maybe_existed_token_contract.unwrap();
+        self.token_contracts.remove(token_contract);
+        self.denom_to_token_contract_map.remove(&asset_denom);
+    }
+    //
     #[payable]
     fn do_transfer(
         &mut self,

@@ -26,6 +26,8 @@ use near_sdk::{
 };
 use utils::{interfaces::EscrowFactory, ExtraDepositCost};
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(BorshSerialize, BorshStorageKey)]
 #[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
@@ -53,6 +55,10 @@ impl Contract {
         Self {
             channel_id_set: UnorderedSet::new(StorageKey::ChannelIdSet),
         }
+    }
+    ///
+    pub fn version(&self) -> String {
+        VERSION.to_string()
     }
 }
 
