@@ -517,6 +517,15 @@ impl ExecutionContext for NearIbcStore {
             self.ibc_events_history
                 .push_back((height, vec![event.clone()]));
         }
+        while let Some(first_height) = self.ibc_events_history.first_key() {
+            if first_height.revision_height()
+                < height.revision_height() - self.max_ibc_events_height_difference
+            {
+                self.ibc_events_history.pop_front();
+            } else {
+                break;
+            }
+        }
         event.emit();
         Ok(())
     }

@@ -54,5 +54,5 @@ pub struct ValidatorKeyAndPower {
 pub struct VscPacketData {
     pub validator_pubkeys: Vec<ValidatorKeyAndPower>,
     pub validator_set_id: U64,
-    pub slash_acks: Vec<Vec<u8>>,
+    pub slash_acks: Vec<String>,
 }

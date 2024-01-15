@@ -23,7 +23,11 @@ where
     ///
     fn get_key_by_index(&self, index: &u64) -> Option<&K>;
     ///
-    fn latest_key(&self) -> Option<&K> {
+    fn first_key(&self) -> Option<&K> {
+        self.get_key_by_index(&self.start_index())
+    }
+    ///
+    fn last_key(&self) -> Option<&K> {
         self.get_key_by_index(&self.end_index())
     }
     ///

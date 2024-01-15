@@ -146,11 +146,7 @@ impl OctopusAppchainAnchorActions for NearIbcContract {
                         )
                         .collect(),
                     valset_update_id: vsc_packet_data.validator_set_id.0,
-                    slash_acks: vsc_packet_data
-                        .slash_acks
-                        .into_iter()
-                        .map(|bytes| hex::encode(&bytes))
-                        .collect(),
+                    slash_acks: vsc_packet_data.slash_acks,
                 },
                 timeout_height_on_b: TimeoutHeight::Never,
                 timeout_timestamp_on_b: Timestamp::from_nanoseconds(

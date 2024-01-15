@@ -1,7 +1,8 @@
-use crate::*;
 use crate::{
     collections::IndexedAscendingQueueViewer,
+    ibc_impl::core::{client_state::AnyClientState, consensus_state::AnyConsensusState},
     types::{Qualified, QueryHeight, QueryPacketEventDataRequest},
+    *,
 };
 use ibc::{
     clients::tendermint::context::CommonContext,
@@ -25,10 +26,13 @@ use ibc::{
         },
     },
 };
+use ibc_proto::Protobuf;
 use itertools::Itertools;
 use near_sdk::{
     borsh::{BorshDeserialize, BorshSerialize},
-    env, near_bindgen,
+    env,
+    json_types::U64,
+    near_bindgen,
 };
 
 pub trait Viewer {
@@ -40,12 +44,20 @@ pub trait Viewer {
     fn get_connection_ends(&self) -> Vec<(ConnectionId, ConnectionEnd)>;
     /// Get the channel end associated with the given port and channel identifiers.
     fn get_channel_end(&self, port_id: PortId, channel_id: ChannelId) -> Option<ChannelEnd>;
-    /// Get the raw client state associated with the given client identifier.
+    /// Get the raw client state associated with the given client identifier.``
     fn get_client_state(&self, client_id: ClientId) -> Vec<u8>;
+    /// View the client state associated with the given client identifier.
+    fn view_client_state(&self, client_id: ClientId) -> Option<String>;
     /// Get the heights of all stored consensus states associated with the given client identifier.
     fn get_client_consensus_heights(&self, client_id: ClientId) -> Vec<Height>;
     /// Get the consensus state associated with the given client identifier and height.
     fn get_client_consensus(&self, client_id: ClientId, consensus_height: Height) -> Vec<u8>;
+    /// View the consensus state associated with the given client identifier and height.
+    fn view_client_consensus(
+        &self,
+        client_id: ClientId,
+        consensus_height: Height,
+    ) -> Option<String>;
     /// Get the packet receipt associated with the given port, channel, and sequence.
     fn get_packet_receipt(&self, port_id: PortId, channel_id: ChannelId, seq: Sequence) -> Vec<u8>;
     /// Get the unreceived packet sequences associated with the given port and channel.
@@ -107,6 +119,9 @@ pub trait Viewer {
     fn get_ibc_events_heights(&self) -> Vec<Height>;
     /// Get ibc events happened on the given height.
     fn get_ibc_events_at(&self, height: Height) -> Vec<IbcEvent>;
+    /// Get the maximum height difference between the latest height and the height
+    /// of the ibc events.
+    fn get_max_ibc_events_height_difference(&self) -> U64;
 }
 
 #[near_bindgen]
@@ -122,7 +137,7 @@ impl Viewer for NearIbcContract {
             .connection_end(&connection_id)
             .map_or(None, |ce| Some(ce))
     }
-
+    //
     fn get_connection_ends(&self) -> Vec<(ConnectionId, ConnectionEnd)> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
@@ -136,26 +151,37 @@ impl Viewer for NearIbcContract {
             })
             .collect()
     }
-
+    //
     fn get_channel_end(&self, port_id: PortId, channel_id: ChannelId) -> Option<ChannelEnd> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
             .channel_end(&ChannelEndPath::new(&port_id, &channel_id))
             .map_or(None, |ce| Some(ce))
     }
-
+    //
     fn get_client_state(&self, client_id: ClientId) -> Vec<u8> {
         let client_state_key = ClientStatePath(client_id.clone()).to_string().into_bytes();
         env::storage_read(&client_state_key).unwrap_or(vec![])
     }
-
+    //
+    fn view_client_state(&self, client_id: ClientId) -> Option<String> {
+        let bytes = self.get_client_state(client_id);
+        if bytes.is_empty() {
+            None
+        } else {
+            Some(format!("{:?}", AnyClientState::decode(&bytes[..]).unwrap()))
+        }
+    }
+    //
     fn get_client_consensus_heights(&self, client_id: ClientId) -> Vec<Height> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
-        near_ibc_store
+        let mut result = near_ibc_store
             .consensus_state_heights(&client_id)
-            .unwrap_or(Vec::new())
+            .unwrap_or(Vec::new());
+        result.sort();
+        result
     }
-
+    //
     fn get_client_consensus(&self, client_id: ClientId, consensus_height: Height) -> Vec<u8> {
         let consensus_state_key = ClientConsensusStatePath::new(
             client_id,
@@ -166,7 +192,23 @@ impl Viewer for NearIbcContract {
         .into_bytes();
         env::storage_read(&consensus_state_key).unwrap_or(vec![])
     }
-
+    //
+    fn view_client_consensus(
+        &self,
+        client_id: ClientId,
+        consensus_height: Height,
+    ) -> Option<String> {
+        let bytes = self.get_client_consensus(client_id, consensus_height);
+        if bytes.is_empty() {
+            None
+        } else {
+            Some(format!(
+                "{:?}",
+                AnyConsensusState::decode(&bytes[..]).unwrap()
+            ))
+        }
+    }
+    //
     fn get_packet_receipt(
         &self,
         port_id: PortId,
@@ -178,7 +220,7 @@ impl Viewer for NearIbcContract {
             .get_packet_receipt(&ReceiptPath::new(&port_id, &channel_id, sequence))
             .map_or(vec![], |receipt| borsh::to_vec(&receipt).unwrap())
     }
-
+    //
     fn get_unreceipt_packet(
         &self,
         port_id: PortId,
@@ -196,7 +238,7 @@ impl Viewer for NearIbcContract {
             .cloned()
             .collect()
     }
-
+    //
     fn get_clients(&self) -> Vec<(ClientId, Vec<u8>)> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
@@ -205,12 +247,12 @@ impl Viewer for NearIbcContract {
             .map(|id| (id.clone(), self.get_client_state(id.clone())))
             .collect()
     }
-
+    //
     fn get_client_counter(&self) -> u64 {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store.client_counter
     }
-
+    //
     fn get_connections(&self) -> Vec<IdentifiedConnectionEnd> {
         self.get_connection_ends()
             .iter()
@@ -220,7 +262,7 @@ impl Viewer for NearIbcContract {
             })
             .collect()
     }
-
+    //
     fn get_client_connections(&self, client_id: ClientId) -> Vec<ConnectionId> {
         #[derive(BorshDeserialize, BorshSerialize, Debug)]
         #[borsh(crate = "near_sdk::borsh")]
@@ -232,7 +274,7 @@ impl Viewer for NearIbcContract {
             .map(|bytes| ConnectionIds::try_from_slice(&bytes).unwrap().0)
             .unwrap_or(vec![])
     }
-
+    //
     fn get_connection_channels(&self, connection_id: ConnectionId) -> Vec<IdentifiedChannelEnd> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
@@ -254,7 +296,7 @@ impl Viewer for NearIbcContract {
             })
             .collect()
     }
-
+    //
     fn get_channels(&self) -> Vec<IdentifiedChannelEnd> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
@@ -269,7 +311,7 @@ impl Viewer for NearIbcContract {
             })
             .collect()
     }
-
+    //
     fn get_packet_commitment(
         &self,
         port_id: PortId,
@@ -281,7 +323,7 @@ impl Viewer for NearIbcContract {
             .get_packet_commitment(&CommitmentPath::new(&port_id, &channel_id, sequence))
             .map_or(None, |commitment| Some(commitment))
     }
-
+    //
     fn get_packet_commitment_sequences(
         &self,
         port_id: PortId,
@@ -295,7 +337,7 @@ impl Viewer for NearIbcContract {
                 sequences.iter().map(|seq| seq.clone()).collect()
             })
     }
-
+    //
     fn get_next_sequence_receive(
         &self,
         port_id: PortId,
@@ -306,7 +348,7 @@ impl Viewer for NearIbcContract {
             .get_next_sequence_recv(&SeqRecvPath::new(&port_id, &channel_id))
             .map_or(None, |sq| Some(sq))
     }
-
+    //
     fn get_packet_acknowledgement(
         &self,
         port_id: PortId,
@@ -318,7 +360,7 @@ impl Viewer for NearIbcContract {
             .get_packet_acknowledgement(&AckPath::new(&port_id, &channel_id, sequence))
             .map_or(None, |ack| Some(ack))
     }
-
+    //
     fn get_packet_acknowledgement_sequences(
         &self,
         port_id: PortId,
@@ -332,12 +374,12 @@ impl Viewer for NearIbcContract {
                 sequences.iter().map(|seq| seq.clone()).collect()
             })
     }
-
+    //
     fn get_commitment_prefix(&self) -> Vec<u8> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store.commitment_prefix().into_vec()
     }
-
+    //
     fn get_packet_events(
         &self,
         request: QueryPacketEventDataRequest,
@@ -346,11 +388,11 @@ impl Viewer for NearIbcContract {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         let (target_height, need_to_search_in_range) = match &request.height {
             Qualified::SmallerEqual(query_height) => match query_height {
-                QueryHeight::Latest => (near_ibc_store.ibc_events_history.latest_key(), true),
+                QueryHeight::Latest => (near_ibc_store.ibc_events_history.last_key(), true),
                 QueryHeight::Specific(height) => (Some(height), true),
             },
             Qualified::Equal(query_height) => match query_height {
-                QueryHeight::Latest => (near_ibc_store.ibc_events_history.latest_key(), false),
+                QueryHeight::Latest => (near_ibc_store.ibc_events_history.last_key(), false),
                 QueryHeight::Specific(height) => (Some(height), false),
             },
         };
@@ -386,7 +428,7 @@ impl Viewer for NearIbcContract {
         }
         result
     }
-
+    //
     fn get_ibc_events_heights(&self) -> Vec<Height> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
@@ -397,7 +439,7 @@ impl Viewer for NearIbcContract {
             .map(|h| h.unwrap().clone())
             .collect()
     }
-
+    //
     fn get_ibc_events_at(&self, height: Height) -> Vec<IbcEvent> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
         near_ibc_store
@@ -405,6 +447,11 @@ impl Viewer for NearIbcContract {
             .get_value_by_key(&height)
             .map(|events| events.clone())
             .unwrap_or_else(|| vec![])
+    }
+    //
+    fn get_max_ibc_events_height_difference(&self) -> U64 {
+        let near_ibc_store = self.near_ibc_store.get().unwrap();
+        U64::from(near_ibc_store.max_ibc_events_height_difference)
     }
 }
 
@@ -418,17 +465,24 @@ fn gether_ibc_events_with_height(
         .iter()
         .filter(|event| request.event_type.eq(event.event_type()))
         .filter(|event| match event {
-            IbcEvent::CreateClient(_) => true,
-            IbcEvent::UpdateClient(_) => true,
-            IbcEvent::ReceivePacket(receive_packet) => {
-                request.source_port_id.eq(receive_packet.port_id_on_b())
-                    && request.source_channel_id.eq(receive_packet.chan_id_on_b())
-                    && request
-                        .destination_port_id
-                        .eq(receive_packet.port_id_on_a())
+            IbcEvent::SendPacket(send_packet) => {
+                request.source_port_id.eq(send_packet.port_id_on_a())
+                    && request.source_channel_id.eq(send_packet.chan_id_on_a())
+                    && request.destination_port_id.eq(send_packet.port_id_on_b())
                     && request
                         .destination_channel_id
-                        .eq(receive_packet.chan_id_on_a())
+                        .eq(send_packet.chan_id_on_b())
+                    && request.sequences.contains(&send_packet.seq_on_a())
+            }
+            IbcEvent::ReceivePacket(receive_packet) => {
+                request.source_port_id.eq(receive_packet.port_id_on_a())
+                    && request.source_channel_id.eq(receive_packet.chan_id_on_a())
+                    && request
+                        .destination_port_id
+                        .eq(receive_packet.port_id_on_b())
+                    && request
+                        .destination_channel_id
+                        .eq(receive_packet.chan_id_on_b())
                     && request.sequences.contains(&receive_packet.seq_on_b())
             }
             IbcEvent::WriteAcknowledgement(write_ack) => {
@@ -438,9 +492,11 @@ fn gether_ibc_events_with_height(
                     && request.destination_channel_id.eq(write_ack.chan_id_on_b())
                     && request.sequences.contains(&write_ack.seq_on_a())
             }
-            _ => false,
+            _ => true,
         })
         .map(|event| event.clone())
         .collect_vec();
-    result.push((height.clone(), events));
+    if !events.is_empty() {
+        result.push((height.clone(), events));
+    }
 }

@@ -56,7 +56,11 @@ impl ValidationContext for NearIbcStore {
             Some(data) => {
                 let result: AnyClientState =
                     Protobuf::<Any>::decode_vec(&data).map_err(|e| ClientError::Other {
-                        description: format!("Decode ClientState failed: {:?}", e).to_string(),
+                        description: format!(
+                            "Decode ClientState failed for client id {}: {:?}",
+                            client_id, e
+                        )
+                        .to_string(),
                     })?;
                 Ok(result)
             }

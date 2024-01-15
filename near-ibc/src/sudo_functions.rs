@@ -1,4 +1,12 @@
-use crate::*;
+use crate::{context::NearEd25519Verifier, ibc_impl::core::client_state::AnyClientState, *};
+use ibc::{
+    clients::tendermint::{
+        client_state::ClientState as TmClientState, types::ClientState as TmClientStateType,
+    },
+    core::host::types::path::ClientStatePath,
+};
+use ibc_proto::Protobuf;
+use near_sdk::json_types::U64;
 
 pub trait SudoFunctions {
     /// Cancel the transfer request in the channel escrow contract.
@@ -40,6 +48,10 @@ pub trait SudoFunctions {
     ///
     /// Only the governance account can call this function.
     fn unregister_asset_from_channel(&mut self, channel_id: String, base_denom: String);
+    /// Force clear the frozen height of the given tendermint client.
+    fn force_clear_frozen_height_of_tendermint_client(&mut self, client_id: ClientId);
+    /// Change the max IBC events height difference.
+    fn change_max_ibc_events_height_difference(&mut self, max_height_difference: U64);
 }
 
 #[near_bindgen]
@@ -211,5 +223,55 @@ impl SudoFunctions for NearIbcContract {
             .unregister_asset(asset_denom.base_denom);
         ExtraDepositCost::add(0);
         utils::refund_deposit(used_bytes);
+    }
+    //
+    #[payable]
+    fn force_clear_frozen_height_of_tendermint_client(&mut self, client_id: ClientId) {
+        self.assert_governance();
+        near_sdk::assert_one_yocto();
+        let client_state_key = ClientStatePath(client_id.clone()).to_string().into_bytes();
+        if let Some(bytes) = env::storage_read(&client_state_key) {
+            let client_state = AnyClientState::decode(&bytes[..]).expect("Invalid client state.");
+            log!("Old client state of {}: {:?}", client_id, client_state);
+            match client_state {
+                AnyClientState::Tendermint(tm_cs) => {
+                    let tm_cs_type = tm_cs.inner();
+                    let new_cs =
+                        AnyClientState::Tendermint(TmClientState::<NearEd25519Verifier>::from(
+                            TmClientStateType::<NearEd25519Verifier>::new(
+                                tm_cs_type.chain_id.clone(),
+                                tm_cs_type.trust_level,
+                                tm_cs_type.trusting_period,
+                                tm_cs_type.unbonding_period,
+                                tm_cs_type.max_clock_drift,
+                                tm_cs_type.latest_height,
+                                tm_cs_type.proof_specs.clone(),
+                                tm_cs_type.upgrade_path.clone(),
+                                tm_cs_type.allow_update,
+                            )
+                            .expect("Invalid tendermint client state."),
+                        ));
+                    log!("New client state of {}: {:?}", client_id, new_cs);
+                    env::storage_write(&client_state_key, &new_cs.encode_vec());
+                }
+            }
+        } else {
+            panic!("Invalid client id.");
+        }
+    }
+    //
+    fn change_max_ibc_events_height_difference(&mut self, max_height_difference: U64) {
+        self.assert_governance();
+        let mut near_ibc_store = self.near_ibc_store.get().unwrap();
+        assert!(
+            max_height_difference.0 != near_ibc_store.max_ibc_events_height_difference,
+            "The max height difference is not changed."
+        );
+        assert!(
+            max_height_difference.0 >= 48 * 3600,
+            "The max height difference must be not less than 172800."
+        );
+        near_ibc_store.max_ibc_events_height_difference = max_height_difference.into();
+        self.near_ibc_store.set(&near_ibc_store);
     }
 }
