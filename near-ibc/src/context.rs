@@ -50,6 +50,9 @@ pub struct NearIbcStore {
         LookupMap<(PortId, ChannelId), UnorderedSet<Sequence>>,
     /// The history of IBC events.
     pub ibc_events_history: IndexedAscendingLookupQueue<Height, Vec<IbcEvent>>,
+    /// The max height difference between the latest height and the oldest height
+    /// in IbcEventsHistory.
+    pub max_ibc_events_height_difference: u64,
 }
 
 pub trait NearIbcStoreHost {
@@ -100,6 +103,7 @@ impl NearIbcStore {
                 StorageKey::IbcEventsHistoryValueMap,
                 u64::MAX,
             ),
+            max_ibc_events_height_difference: u64::MAX,
         }
     }
     ///

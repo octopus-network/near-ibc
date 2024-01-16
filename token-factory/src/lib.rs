@@ -16,6 +16,8 @@ use utils::{
 
 mod migration;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(BorshSerialize, BorshStorageKey)]
 #[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
@@ -48,6 +50,10 @@ impl Contract {
             asset_id_mappings: UnorderedMap::new(StorageKey::AssetIdMappings),
             denom_to_asset_id_map: LookupMap::new(StorageKey::DenomToAssetIdMap),
         }
+    }
+    ///
+    pub fn version(&self) -> String {
+        VERSION.to_string()
     }
     ///
     fn assert_asset_not_registered(&self, cross_chain_asset: &CrossChainAsset) {

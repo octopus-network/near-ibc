@@ -244,4 +244,20 @@ where
             None
         }
     }
+    ///
+    pub fn get_first_value(&self) -> Option<&V> {
+        if let Some(key) = self.first_key() {
+            self.get_value_by_key(&key)
+        } else {
+            None
+        }
+    }
+    ///
+    pub fn get_last_value(&self) -> Option<&V> {
+        if let Some(key) = self.last_key() {
+            self.get_value_by_key(&key)
+        } else {
+            None
+        }
+    }
 }

@@ -72,7 +72,6 @@ impl StorageMigration for NearIbcContract {
             governance_account: old_contract.governance_account,
         };
         //
-        env::storage_write("version".as_bytes(), VERSION.as_bytes());
         //
         new_contract
     }
@@ -102,6 +101,7 @@ impl NearIbcStore {
             packet_receipt_sequence_sets: old_version.packet_receipt_sequence_sets,
             packet_acknowledgement_sequence_sets: old_version.packet_acknowledgement_sequence_sets,
             ibc_events_history: old_version.ibc_events_history,
+            max_ibc_events_height_difference: 288000,
         }
     }
 }
