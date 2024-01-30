@@ -8,7 +8,7 @@ use ibc::{
     clients::tendermint::context::CommonContext,
     core::{
         channel::types::{
-            channel::{ChannelEnd, IdentifiedChannelEnd},
+            channel::{ChannelEnd, IdentifiedChannelEnd, Order},
             commitment::{AcknowledgementCommitment, PacketCommitment},
         },
         client::types::Height,
@@ -61,7 +61,7 @@ pub trait Viewer {
     /// Get the packet receipt associated with the given port, channel, and sequence.
     fn get_packet_receipt(&self, port_id: PortId, channel_id: ChannelId, seq: Sequence) -> Vec<u8>;
     /// Get the unreceived packet sequences associated with the given port and channel.
-    fn get_unreceipt_packet(
+    fn get_unreceived_packets(
         &self,
         port_id: PortId,
         channel_id: ChannelId,
@@ -221,22 +221,40 @@ impl Viewer for NearIbcContract {
             .map_or(vec![], |receipt| borsh::to_vec(&receipt).unwrap())
     }
     //
-    fn get_unreceipt_packet(
+    fn get_unreceived_packets(
         &self,
         port_id: PortId,
         channel_id: ChannelId,
         sequences: Vec<Sequence>,
     ) -> Vec<Sequence> {
         let near_ibc_store = self.near_ibc_store.get().unwrap();
-        let stored_sequences = near_ibc_store
-            .packet_receipt_sequence_sets
-            .get(&(port_id, channel_id))
-            .map_or_else(|| vec![], |receipts| receipts.iter().collect());
-        sequences
-            .iter()
-            .filter(|sequence| !stored_sequences.contains(&sequence))
-            .cloned()
-            .collect()
+        if let Some(channel_end) = near_ibc_store
+            .channel_end(&ChannelEndPath::new(&port_id, &channel_id))
+            .map_or(None, |ce| Some(ce))
+        {
+            if *channel_end.ordering() == Order::Ordered {
+                let next_sequence_recv = near_ibc_store
+                    .get_next_sequence_recv(&SeqRecvPath::new(&port_id, &channel_id))
+                    .map_or(Sequence::default(), |sq| sq);
+                sequences
+                    .iter()
+                    .filter(|sequence| sequence >= &&next_sequence_recv)
+                    .cloned()
+                    .collect()
+            } else {
+                let stored_sequences = near_ibc_store
+                    .packet_receipt_sequence_sets
+                    .get(&(port_id, channel_id))
+                    .map_or_else(|| vec![], |receipts| receipts.iter().collect());
+                sequences
+                    .iter()
+                    .filter(|sequence| !stored_sequences.contains(&sequence))
+                    .cloned()
+                    .collect()
+            }
+        } else {
+            panic!("Channel not found");
+        }
     }
     //
     fn get_clients(&self) -> Vec<(ClientId, Vec<u8>)> {
