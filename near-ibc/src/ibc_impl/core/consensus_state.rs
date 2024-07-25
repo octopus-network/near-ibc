@@ -75,7 +75,7 @@ impl ConsensusState for AnyConsensusState {
     fn encode_vec(self) -> Vec<u8> {
         match self {
             AnyConsensusState::Tendermint(value) => {
-                ibc::core::client::context::consensus_state::ConsensusState::encode_vec(value)
+                ConsensusState::encode_vec(value)
             }
         }
     }

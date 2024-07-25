@@ -58,7 +58,7 @@ pub struct NearIbcStore {
 pub trait NearIbcStoreHost {
     ///
     fn get_near_ibc_store() -> NearIbcStore {
-        let store = near_sdk::env::storage_read(&borsh::to_vec(&StorageKey::NearIbcStore).unwrap())
+        let store = env::storage_read(&borsh::to_vec(&StorageKey::NearIbcStore).unwrap())
             .unwrap();
         let store = NearIbcStore::try_from_slice(&store).unwrap();
         store
@@ -66,7 +66,7 @@ pub trait NearIbcStoreHost {
     ///
     fn set_near_ibc_store(store: &NearIbcStore) {
         let store = borsh::to_vec(&store).unwrap();
-        near_sdk::env::storage_write(&borsh::to_vec(&StorageKey::NearIbcStore).unwrap(), &store);
+        env::storage_write(&borsh::to_vec(&StorageKey::NearIbcStore).unwrap(), &store);
     }
 }
 

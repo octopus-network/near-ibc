@@ -14,7 +14,7 @@ use utils::{
     ExtraDepositCost,
 };
 
-mod migration;
+pub mod migration;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 

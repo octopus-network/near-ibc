@@ -1939,7 +1939,6 @@ dependencies = [
  "itertools",
  "near-contract-standards",
  "near-sdk",
- "octopus-lpos",
  "serde",
  "sha2 0.10.8",
  "tendermint",
@@ -2227,22 +2226,6 @@ checksum = "4161fcb6d602d4d2081af7c3a45852d875a03dd337a6bfdd6e06407b61342a43"
 dependencies = [
  "hermit-abi 0.3.3",
  "libc",
-]
-
-[[package]]
-name = "octopus-lpos"
-version = "0.1.0"
-source = "git+https://github.com/octopus-network/octopus-lpos-ibc.git?branch=upgrade-ibc-to-v0.48.1#0152ba3f784c3c5f22d6bc165d5810392a1314e2"
-dependencies = [
- "base64 0.21.5",
- "displaydoc",
- "ibc",
- "ibc-proto",
- "serde",
- "serde_json",
- "subtle-encoding",
- "tendermint",
- "tendermint-proto",
 ]
 
 [[package]]

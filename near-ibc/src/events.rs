@@ -51,7 +51,7 @@ fn event_test() {
     use std::{dbg, str::FromStr};
 
     let event_json = "{\"raw-ibc-event\":{\"CreateClient\":{\"client_id\":{\"client_id\":\"07-tendermint-0\"},\"client_type\":{\"client_type\":\"07-tendermint\"},\"consensus_height\":{\"consensus_height\":{\"revision_height\":53650,\"revision_number\":0}}}},\"standard\":\"near-ibc\",\"version\":\"1.0.0\"}";
-    let event_value = near_sdk::serde_json::value::Value::from_str(event_json).unwrap();
+    let event_value = Value::from_str(event_json).unwrap();
     let raw_ibc = event_value["raw-ibc-event"].clone();
     let ibc_event: IbcEvent = near_sdk::serde_json::from_value(raw_ibc).unwrap();
     dbg!(&ibc_event);

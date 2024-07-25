@@ -40,7 +40,6 @@ use near_sdk::{
     store::LookupMap,
     AccountId, BorshStorageKey, NearToken, PanicOnDefault,
 };
-use octopus_lpos::msgs::MsgValidatorSetChange;
 use types::*;
 use utils::{
     interfaces::{
@@ -52,15 +51,15 @@ use utils::{
 };
 
 pub mod collections;
-mod context;
+pub mod context;
 mod events;
 mod ext_interfaces;
 mod ibc_impl;
 pub mod migration;
 mod module_holder;
 mod prelude;
-mod sudo_functions;
-mod testnet_functions;
+pub mod sudo_functions;
+pub mod testnet_functions;
 pub mod types;
 pub mod viewer;
 
@@ -122,12 +121,12 @@ pub struct NearIbcContract {
 impl NearIbcContract {
     #[private]
     #[init]
-    pub fn init(appchain_registry_account: AccountId) -> Self {
+    pub fn init() -> Self {
         env::storage_write("version".as_bytes(), VERSION.as_bytes());
         Self {
             near_ibc_store: LazyOption::new(StorageKey::NearIbcStore, Some(&NearIbcStore::new())),
             governance_account: env::current_account_id(),
-            module_holder: ModuleHolder::new(appchain_registry_account),
+            module_holder: ModuleHolder::new(),
         }
     }
     ///

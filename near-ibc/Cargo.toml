@@ -17,6 +17,5 @@ serde = { workspace = true }
 getrandom = { workspace = true }
 tendermint = { workspace = true }
 hex = { workspace = true }
-octopus-lpos = { workspace = true }
 token-factory = { path = "../token-factory" }
 utils = { path = "../utils" }

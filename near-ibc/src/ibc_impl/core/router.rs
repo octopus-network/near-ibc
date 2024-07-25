@@ -10,7 +10,6 @@ impl Router for NearIbcContract {
     fn get_route(&self, module_id: &ModuleId) -> Option<&dyn Module> {
         match module_id.to_string().as_str() {
             ibc::apps::transfer::types::MODULE_ID_STR => Some(&self.module_holder.transfer_module),
-            octopus_lpos::MODULE_ID_STR => Some(&self.module_holder.octopus_lpos_module),
             _ => None,
         }
     }
@@ -20,7 +19,6 @@ impl Router for NearIbcContract {
             ibc::apps::transfer::types::MODULE_ID_STR => {
                 Some(&mut self.module_holder.transfer_module)
             }
-            octopus_lpos::MODULE_ID_STR => Some(&mut self.module_holder.octopus_lpos_module),
             _ => None,
         }
     }

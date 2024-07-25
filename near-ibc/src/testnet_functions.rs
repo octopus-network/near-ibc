@@ -250,7 +250,7 @@ mod tests {
         testing_env!(context.predecessor_account_id(test_account.clone()).build());
         testing_env!(context.current_account_id(test_account.clone()).build());
 
-        let mut near_ibc_contract = NearIbcContract::init(test_account);
+        let mut near_ibc_contract = NearIbcContract::init();
         let height = vec![
             Height::new(0, 1).unwrap(),
             Height::new(0, 2).unwrap(),

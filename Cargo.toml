@@ -29,7 +29,6 @@ serde = "1.0"
 getrandom = { version = "0.2", features = ["custom"] }
 tendermint = { version = "0.34" }
 hex = "0.4"
-octopus-lpos = { git = "https://github.com/octopus-network/octopus-lpos-ibc.git", branch = "upgrade-ibc-to-v0.48.1" }
 
 [patch.crates-io]
 ibc = { git = "https://github.com/octopus-network/ibc-rs.git", branch = "v0.48.1-octopus-nearibc" }
